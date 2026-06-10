@@ -1,0 +1,39 @@
+[project]
+name = "research-pilot"
+version = "0.1.0"
+description = "A lightweight Claude Code-like agent harness for deep research, paper RAG, and codebase understanding."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0"
+]
+
+llm = [
+    "openai>=1.0.0"
+]
+
+rag = [
+    "pypdf>=4.0.0",
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0.0"
+]
+
+[project.scripts]
+research-pilot = "research_pilot.cli:app"
+
+[build-system]
+requires = ["setuptools>=73.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
