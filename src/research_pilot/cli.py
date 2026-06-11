@@ -19,7 +19,7 @@ from research_pilot.agents.research_planner_agent import ResearchPlannerAgent
 from research_pilot.core.llm_client import OpenAICompatibleLLMClient
 from research_pilot.core.state import AgentState
 from research_pilot.tools.report_tool import SaveReportTool
-from research_pilot.tools.web_search_tool import MockWebSearchTool
+from research_pilot.tools.web_search_tool import MockWebSearchTool, TavilyWebSearchTool
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -56,7 +56,10 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
     tool_runtime.register(ShellTool(permission_checker))
     tool_runtime.register(TodoWriteTool())
     tool_runtime.register(TodoReadTool())
-    tool_runtime.register(MockWebSearchTool())
+    if settings.web_search_backend.lower() == "tavily":
+        tool_runtime.register(TavilyWebSearchTool())
+    else:
+        tool_runtime.register(MockWebSearchTool())
     tool_runtime.register(SaveReportTool(workspace / "reports"))
 
     context_manager = ContextManager()
