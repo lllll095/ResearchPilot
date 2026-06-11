@@ -20,6 +20,8 @@ from research_pilot.core.llm_client import OpenAICompatibleLLMClient
 from research_pilot.core.state import AgentState
 from research_pilot.tools.report_tool import SaveReportTool
 from research_pilot.tools.web_search_tool import MockWebSearchTool, TavilyWebSearchTool
+from research_pilot.tools.paper_tools import ArxivPaperDownloadTool, ArxivPaperSearchTool
+from research_pilot.tools.summarize_tool import SummarizeEvidenceTool
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -61,6 +63,9 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
     else:
         tool_runtime.register(MockWebSearchTool())
     tool_runtime.register(SaveReportTool(workspace / "reports"))
+    tool_runtime.register(SummarizeEvidenceTool())
+    tool_runtime.register(ArxivPaperSearchTool())
+    tool_runtime.register(ArxivPaperDownloadTool(workspace / "documents" / "papers"))
 
     context_manager = ContextManager()
     trace_store = TraceStore(workspace / "traces")

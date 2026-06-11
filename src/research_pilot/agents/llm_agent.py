@@ -25,6 +25,9 @@ class LLMAgentPolicy:
         "todo_read",
         "web_search",
         "save_report",
+        "summarize_evidence",
+        "paper_search",
+        "paper_download",
     }
 
     def __init__(self, llm_client: OpenAICompatibleLLMClient):
@@ -111,6 +114,19 @@ Research rules:
 - If the user asks for a report or research summary, call save_report before final_answer.
 - A good research flow is: todo_write -> web_search -> save_note -> save_report -> final_answer.
 - Do not claim that a report was saved unless save_report succeeded.
+- A good research flow is: todo_write -> web_search -> paper_search or paper_download if needed -> summarize_evidence -> save_note -> save_report -> final_answer.
+
+Paper rules:
+- If the user asks for papers, related papers, literature, or academic references, use paper_search.
+- If the user asks to download papers, use paper_download.
+- Do not download more papers than requested.
+- If the user does not specify a number, use a small number such as 2 or 3.
+- Downloaded papers are saved under workspace/documents/papers.
+- The paper_download tool has built-in deduplication and will skip previously downloaded papers.
+- If paper_download reports skipped duplicates, do not call paper_download repeatedly with the same query unless the user asks for more papers.
+- Do not use read_file directly on downloaded PDF files unless the user explicitly asks to inspect PDF text.
+- After paper_download succeeds, use its observation and manifest as evidence. The downloaded PDFs will be used later by the Paper RAG indexing pipeline.
+- Use summarize_evidence after collecting search or paper evidence when a summary is needed.
 
 Tool rules:
 - Use only tools listed in the context.

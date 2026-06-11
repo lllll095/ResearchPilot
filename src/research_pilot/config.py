@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
     web_search_backend: str = Field(default="mock", alias="WEB_SEARCH_BACKEND")
 
+    # Paper download configs.
+    max_paper_downloads: int = Field(default=3, alias="MAX_PAPER_DOWNLOADS")
+
     # Future Paper RAG integration configs.
     paper_rag_project_root: str | None = Field(default=None, alias="PAPER_RAG_PROJECT_ROOT")
     paper_rag_engine_relative_path: str | None = Field(
