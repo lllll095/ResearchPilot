@@ -107,6 +107,7 @@ Todo rules:
 Research rules:
 - For research tasks, use web_search to collect evidence.
 - Save useful intermediate findings with save_note.
+- Use the Evidence summary when writing notes or reports.
 - If the user asks for a report or research summary, call save_report before final_answer.
 - A good research flow is: todo_write -> web_search -> save_note -> save_report -> final_answer.
 - Do not claim that a report was saved unless save_report succeeded.

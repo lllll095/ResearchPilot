@@ -1,3 +1,4 @@
+from research_pilot.core.evidence import EvidenceItem, EvidenceType
 from research_pilot.core.observation import Observation
 from research_pilot.core.tool import BaseTool, ToolSpec
 
@@ -67,9 +68,26 @@ class MockWebSearchTool(BaseTool):
             lines.append(f"   Snippet: {result['snippet']}")
             lines.append("")
 
+        content = "\n".join(lines)
+
+        if state is not None:
+            state.evidence_store.add(
+                EvidenceItem(
+                    evidence_type=EvidenceType.WEB_SEARCH,
+                    source=f"web_search:{query}",
+                    content=content,
+                    metadata={
+                        "query": query,
+                        "num_results": len(mock_results),
+                        "backend": "mock",
+                        "results": mock_results,
+                    },
+                )
+            )
+
         return Observation(
             success=True,
-            content="\n".join(lines),
+            content=content,
             metadata={
                 "query": query,
                 "num_results": len(mock_results),

@@ -8,10 +8,11 @@ from research_pilot.core.tool_runtime import ToolRuntime
 class ContextManager:
     """Build compact context for the Agent.
 
-    Phase 2.5 context includes:
+    Phase 3A-2 context includes:
     - user goal
     - available tool specs
     - current todo list
+    - evidence summary
     - todo reminder
     - recent steps
 
@@ -25,6 +26,7 @@ class ContextManager:
         recent_steps = state.steps[-5:]
         tool_specs = [spec.model_dump() for spec in tool_runtime.tool_specs()]
         todo_reminder = state.todo_reminder or "No todo reminder."
+        evidence_summary = state.evidence_store.render(max_items=6)
 
         step_text = "\n".join(
             f"Step {step.step_id}:\n"
@@ -38,6 +40,9 @@ class ContextManager:
 
 Current todo list:
 {state.todo_list.render()}
+
+Evidence summary:
+{evidence_summary}
 
 Todo reminder:
 {todo_reminder}

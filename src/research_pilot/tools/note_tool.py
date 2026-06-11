@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+from research_pilot.core.evidence import EvidenceItem, EvidenceType
 from research_pilot.core.observation import Observation
 from research_pilot.core.tool import BaseTool, ToolSpec
 
@@ -39,6 +40,17 @@ class SaveNoteTool(BaseTool):
 
         if state is not None:
             state.add_note(str(path))
+            state.evidence_store.add(
+                EvidenceItem(
+                    evidence_type=EvidenceType.NOTE,
+                    source=str(path),
+                    content=content,
+                    metadata={
+                        "title": title,
+                        "path": str(path),
+                    },
+                )
+            )
 
         return Observation(
             success=True,
