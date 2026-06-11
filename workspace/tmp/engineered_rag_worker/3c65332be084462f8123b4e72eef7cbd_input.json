@@ -1,0 +1,8 @@
+{
+  "command": "search",
+  "payload": {
+    "query": "How does agentic RAG differ from baseline RAG?",
+    "paper_k": null,
+    "chunk_k": null
+  }
+}

@@ -30,6 +30,7 @@ from research_pilot.tools.engineered_rag_tool import (
 from research_pilot.tools.evidence_answer_tool import WriteEvidenceAnswerTool
 from research_pilot.workflows.paper_workflows import PaperWorkflowRunner
 from research_pilot.workflows.intent_router import IntentRouter, IntentType
+from research_pilot.evaluation.paper_eval import PaperWorkflowEvaluator
 
 
 app = typer.Typer(help="ResearchPilot command line interface.")
@@ -340,6 +341,44 @@ def ask(
 
     console.rule("[bold green]ResearchPilot Answer")
     console.print(result.final_answer)
+
+@app.command("eval-paper")
+def eval_paper(
+    cases_path: Path = typer.Option(
+        Path("eval/paper_eval_cases.jsonl"),
+        "--cases",
+        help="Path to JSONL paper evaluation cases.",
+    ),
+    max_cases: int | None = typer.Option(
+        None,
+        "--max-cases",
+        help="Optional maximum number of cases to run.",
+    ),
+):
+    """Evaluate paper workflows with rule-based checks."""
+
+    runner = build_paper_workflow_runner()
+
+    output_dir = Path(settings.workspace) / "eval_runs"
+
+    evaluator = PaperWorkflowEvaluator(
+        runner=runner,
+        output_dir=output_dir,
+    )
+
+    cases = evaluator.load_cases(cases_path)
+    summary = evaluator.run_cases(
+        cases=cases,
+        max_cases=max_cases,
+    )
+
+    console.rule("[bold green]Paper Evaluation Summary")
+    console.print(f"Total: {summary.total}")
+    console.print(f"Passed: {summary.passed}")
+    console.print(f"Failed: {summary.failed}")
+    console.print(f"Pass rate: {summary.pass_rate:.1%}")
+    console.print(f"Results: {summary.results_path}")
+    console.print(f"Summary: {summary.summary_path}")
 
 if __name__ == "__main__":
     app()

@@ -1,0 +1,4 @@
+{"case_id":"paper_qa_001","workflow":"paper_answer","question":"What is the architecture of agentic RAG in the indexed papers?","save_report":false}
+{"case_id":"paper_qa_002","workflow":"paper_answer","question":"How does agentic RAG differ from baseline RAG?","save_report":false}
+{"case_id":"paper_qa_003","workflow":"paper_answer","question":"What components are involved in agentic RAG systems?","save_report":false}
+{"case_id":"paper_report_001","workflow":"paper_answer","question":"Explain the architecture of agentic RAG with citations.","save_report":true}
