@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from research_pilot.core.state import AgentState
 from research_pilot.workflows.paper_workflows import PaperWorkflowRunner
+from research_pilot.evaluation.llm_judge import LLMJudgeScores, PaperAnswerLLMJudge
 
 
 class PaperEvalCase(BaseModel):
@@ -46,6 +47,7 @@ class PaperEvalResult(BaseModel):
     question: str
     final_answer: str
     metrics: PaperEvalMetrics
+    llm_judge: LLMJudgeScores | None = None
     trace_like_steps: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -75,9 +77,11 @@ class PaperWorkflowEvaluator:
         self,
         runner: PaperWorkflowRunner,
         output_dir: Path,
+        llm_judge: PaperAnswerLLMJudge | None = None,
     ):
         self.runner = runner
         self.output_dir = output_dir
+        self.llm_judge = llm_judge
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def load_cases(self, cases_path: Path) -> list[PaperEvalCase]:
@@ -244,12 +248,35 @@ class PaperWorkflowEvaluator:
             passed=passed,
         )
 
+        judge_result = None
+
+        if self.llm_judge is not None and workflow_success and no_tool_error:
+            try:
+                print(f"[Eval] Running LLM judge for {case.case_id}...")
+                judge_result = self.llm_judge.judge(
+                    question=case.question,
+                    final_answer=answer,
+                    evidence_store=state.evidence_store,
+                )
+                print(f"[Eval] LLM judge finished for {case.case_id}.")
+                print("[Eval] LLM judge result:")
+                print(
+                    json.dumps(
+                        judge_result.model_dump(),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+            except Exception as exc:
+                print(f"[Eval] LLM judge failed for {case.case_id}: {exc}")
+
         return PaperEvalResult(
             case_id=case.case_id,
             workflow=case.workflow,
             question=case.question,
             final_answer=answer,
             metrics=metrics,
+            llm_judge=judge_result,
             trace_like_steps=trace_like_steps,
         )
 
@@ -292,6 +319,7 @@ class PaperWorkflowEvaluator:
                     f"- Steps: {result.metrics.num_steps}",
                     f"- Tool errors: {result.metrics.num_tool_errors}",
                     "",
+                    *self._render_llm_judge_lines(result),
                     "#### Answer Preview",
                     "",
                     "```markdown",
@@ -302,3 +330,47 @@ class PaperWorkflowEvaluator:
             )
 
         return "\n".join(lines)
+    
+    def _render_llm_judge_lines(self, result: PaperEvalResult) -> list[str]:
+        if result.llm_judge is None:
+            return [
+                "#### LLM Judge",
+                "",
+                "LLM judge was not used or failed for this case.",
+                "",
+            ]
+
+        judge = result.llm_judge
+
+        lines = [
+            "#### LLM Judge",
+            "",
+            f"- Verdict: {judge.verdict}",
+            f"- Overall score: {judge.overall_score:.2f} / 5",
+            f"- Groundedness: {judge.groundedness} / 5",
+            f"- Citation quality: {judge.citation_quality} / 5",
+            f"- Completeness: {judge.completeness} / 5",
+            f"- Clarity: {judge.clarity} / 5",
+            f"- Hallucination risk: {judge.hallucination_risk} / 5",
+            "",
+            "Strengths:",
+        ]
+
+        for item in judge.strengths:
+            lines.append(f"- {item}")
+
+        lines.append("")
+        lines.append("Weaknesses:")
+
+        for item in judge.weaknesses:
+            lines.append(f"- {item}")
+
+        lines.append("")
+        lines.append("Suggestions:")
+
+        for item in judge.suggestions:
+            lines.append(f"- {item}")
+
+        lines.append("")
+
+        return lines

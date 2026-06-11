@@ -1,0 +1,72 @@
+[
+  {
+    "case_id": "paper_qa_001",
+    "workflow": "paper_answer",
+    "question": "What is the architecture of agentic RAG in the indexed papers?",
+    "final_answer": "## Answer\n\nThe architecture of agentic Retrieval-Augmented Generation (RAG) systems in the indexed papers is characterized by modular, multi-agent pipelines that enhance standard RAG with autonomous agents for dynamic query reformulation, iterative sub-query decomposition, and evidence-driven reasoning. Key components include query reformulation agents, retriever agents, structured evidence assessment modules, and adaptive query refinement agents. These components work together in an iterative refinement cycle to improve retrieval accuracy and synthesis, especially in complex, multi-hop queries and specialized domains like fintech [Source 2][Source 3][Source 5][Source 7].\n\n## Architecture Breakdown\n\n- **Query Reformulator Agent**: Refines user queries into concise, keyword-focused queries optimized for retrieval, including detecting query continuation or new topics [Source 5].\n- **Retriever Agent**: Performs retrieval from the knowledge base, typically in a single pass in baseline systems [Source 5].\n- **Structured Evidence Assessment (SEA) Module**: Acts as an analytical gating mechanism that audits aggregated evidence, identifies confirmed facts and informational gaps, and guides further query refinement [Source 7].\n- **Adaptive Query Refinement Agent**: Generates targeted sub-queries to retrieve missing information based on gaps identified by the SEA module [Source 7].\n- **Iterative Refinement Cycle**: A dynamic process where the system repeatedly refines queries and assesses evidence until sufficient context is gathered for faithful generation [Source 7].\n- **Multi-agent Modular Pipeline**: Specialized agents work in sequence or parallel to handle tasks such as intelligent query reformulation, sub-query decomposition, acronym resolution, and context re-ranking [Source 2].\n- **Layered Isolation Architecture** (in multitenant settings): Combines policy-aware ingestion, retrieval-time gating, and server-side enforcement to address relevance-authorization gaps [Source 1].\n\n## Explanation\n\nThe agentic RAG architecture extends the baseline RAG pipeline by integrating multiple specialized agents that collaboratively improve retrieval and generation. Initially, a query reformulator agent processes the user's input to create optimized retrieval queries. The retriever agent then fetches relevant documents or passages. Unlike static RAG systems, agentic RAG employs a Structured Evidence Assessment (SEA) module that systematically evaluates the retrieved evidence, identifying what information is confirmed and what is missing. This assessment informs an adaptive query refinement agent, which generates new sub-queries to fill the identified gaps. This iterative refinement cycle continues until the system accumulates a comprehensive and verified context for the final generation step, enhancing factual accuracy and handling complex, multi-hop queries effectively [Source 7].\n\nIn specialized domains such as fintech, the architecture incorporates modular agents for domain-specific challenges like acronym resolution and context re-ranking, improving retrieval relevance and synthesis quality [Source 2]. Additionally, in multitenant environments, a layered isolation architecture is proposed to enforce strict data isolation and authorization policies, addressing the relevance-authorization gap inherent in retrieval systems [Source 1].\n\nOverall, the architecture is designed to be modular, dynamic, and evidence-driven, leveraging autonomous agents to iteratively refine queries and validate retrieved information, thus advancing beyond the traditional \"retrieve-then-read\" paradigm of RAG systems [Source 7].\n\n## Sources Used\n\n- [Source 1] 01_2605.05287v1.pdf, page 1, chunk 558: relevance-authorization gap and layered isolation architecture.\n- [Source 2] 01_2510.25518v1.pdf, page 0, chunk 420: introduction to agentic RAG architecture with modular pipeline.\n- [Source 3] 01_2510.25518v1.pdf, page 1, chunk 430: overview of agentic RAG and multi-agent pipelines.\n- [Source 5] 01_2510.25518v1.pdf, page 2, chunk 435: baseline RAG system and query reformulator and retriever agents.\n- [Source 7] 01_2510.22344v1.pdf, page 0, chunk 264: FAIR-RAG architecture with iterative refinement cycle, SEA module, and adaptive query refinement.\n- [Source 8] 01_2510.22344v1.pdf, page 19, chunk 358: limitations and dependencies of FAIR-RAG modular agents.\n\n## Limitations\n\nThe retrieved evidence does not provide detailed architectural diagrams or exhaustive component specifications. It also lacks explicit descriptions of implementation details such as model types, training procedures, or integration protocols for the agents. Furthermore, while some papers focus on specific domains like fintech or multitenancy, a unified, comprehensive architectural blueprint for agentic RAG across all contexts is not fully detailed in the retrieved content.",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": false,
+      "answer_length": 4881,
+      "num_steps": 3,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": {
+      "groundedness": 4,
+      "citation_quality": 4,
+      "completeness": 4,
+      "clarity": 5,
+      "hallucination_risk": 2,
+      "overall_score": 4.0,
+      "verdict": "WEAK_PASS",
+      "strengths": [
+        "The answer is mostly well supported by multiple cited sources from the retrieved evidence.",
+        "Key architectural components are clearly identified and linked to specific sources.",
+        "The answer is well structured and easy to follow, with a clear breakdown of components and explanation.",
+        "Limitations are acknowledged transparently, indicating awareness of gaps in the evidence."
+      ],
+      "weaknesses": [
+        "Some claims, especially detailed component functions and iterative refinement specifics, are not fully supported by explicit text in the retrieved evidence.",
+        "Citations are somewhat generic (e.g., [Source 7]) without direct quotes or detailed excerpts for all claims.",
+        "The answer extrapolates a unified architecture from multiple papers without a fully unified architectural blueprint present in the evidence.",
+        "Certain technical details such as model types, training, and integration protocols are missing, which limits completeness."
+      ],
+      "suggestions": [
+        "Include more direct quotations or detailed excerpts from the sources to strengthen groundedness.",
+        "Clarify which claims are inferred versus explicitly stated in the papers to reduce hallucination risk.",
+        "If possible, retrieve additional evidence focusing on architectural diagrams or implementation details.",
+        "Provide more precise citations linking claims to exact pages or paragraphs to improve citation quality."
+      ]
+    },
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  }
+]

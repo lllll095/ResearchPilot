@@ -1,0 +1,8 @@
+{
+  "command": "search",
+  "payload": {
+    "query": "Explain the architecture of agentic RAG with citations.",
+    "paper_k": null,
+    "chunk_k": null
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "command": "search",
+  "payload": {
+    "query": "What components are involved in agentic RAG systems?",
+    "paper_k": null,
+    "chunk_k": null
+  }
+}

@@ -1,0 +1,185 @@
+[
+  {
+    "case_id": "paper_qa_001",
+    "workflow": "paper_answer",
+    "question": "What is the architecture of agentic RAG in the indexed papers?",
+    "final_answer": "## Answer\n\nThe architecture of agentic Retrieval-Augmented Generation (RAG) systems in the indexed papers is characterized by a modular, multi-agent pipeline that enhances the standard RAG approach with autonomous agents for query reformulation, iterative evidence assessment, and adaptive query refinement. Key components include a Query Reformulator Agent, Retriever Agent, Structured Evidence Assessment (SEA) module, and an Adaptive Query Refinement agent. This architecture supports dynamic query decomposition, iterative reasoning, and gating mechanisms to ensure relevance and authorization, addressing limitations of static retrieve-then-read paradigms and improving handling of complex, multi-hop queries [Source 2][Source 5][Source 7].\n\n## Architecture Breakdown\n\n- **Query Reformulator Agent**: Refines user input into optimized queries, detecting continuation or new topics using prompt templates [Source 5].\n- **Retriever Agent**: Performs retrieval from the knowledge base based on reformulated queries [Source 5].\n- **Structured Evidence Assessment (SEA) Module**: Acts as an analytical gating mechanism that audits aggregated evidence, identifies confirmed facts and informational gaps, and guides further query refinement [Source 7].\n- **Adaptive Query Refinement Agent**: Generates targeted sub-queries to retrieve missing information based on SEA feedback, enabling iterative refinement until sufficient evidence is gathered [Source 7].\n- **Layered Isolation Architecture**: Combines policy-aware ingestion and retrieval-time gating to enforce authorization and prevent cross-tenant data leakage in multi-tenant RAG systems [Source 1].\n- **Multi-agent Pipeline**: Integrates autonomous AI agents for dynamic query decomposition and iterative reasoning, enabling complex information tasks beyond standard RAG [Source 3].\n- **Memory Management and Context Paging**: Uses OS-style virtual context management to handle growing contexts and histories, paging information between fast context windows and slower external stores [Source 4].\n\n## Explanation\n\nThe agentic RAG architecture extends the baseline RAG system by introducing specialized agents that work together in a modular pipeline. Initially, the Query Reformulator Agent processes the user's input to create concise, keyword-focused queries optimized for retrieval. The Retriever Agent then fetches relevant documents or data from the knowledge base.\n\nTo handle complex queries, especially multi-hop questions, the Structured Evidence Assessment (SEA) module evaluates the retrieved evidence, identifying what facts are confirmed and where information gaps exist. This assessment informs the Adaptive Query Refinement Agent, which generates new, targeted sub-queries to fill those gaps. This iterative refinement cycle continues until the evidence is deemed sufficient for a final, faithful generation step.\n\nAdditionally, in multi-tenant environments, a layered isolation architecture is employed to enforce strict authorization policies during ingestion and retrieval, preventing data leakage across tenants. The architecture also incorporates memory management strategies that maintain a small, fast \"working set\" within the model's context window and page additional information in and out from external stores, enabling the system to operate over effectively unbounded histories.\n\nTogether, these components form a dynamic, evidence-driven reasoning process that surpasses the static retrieve-then-read paradigm of traditional RAG systems, improving accuracy, reliability, and security in specialized domains such as fintech and complex QA tasks [Source 1][Source 2][Source 3][Source 4][Source 5][Source 7].\n\n## Sources Used\n\n- [Source 1] 01_2605.05287v1.pdf, page 1, chunk 558: Layered isolation architecture and authorization in agentic RAG.\n- [Source 2] 01_2510.25518v1.pdf, page 0, chunk 420: Introduction to agentic RAG architecture with modular pipeline and specialized agents.\n- [Source 3] 01_2510.25518v1.pdf, page 1, chunk 430: Overview of agentic RAG and multi-agent pipelines.\n- [Source 4] 01_2512.09458v1.pdf, page 10, chunk 508: Memory management and OS-style virtual context in agentic AI architectures.\n- [Source 5] 01_2510.25518v1.pdf, page 2, chunk 435: Baseline RAG system components including Query Reformulator and Retriever Agents.\n- [Source 7] 01_2510.22344v1.pdf, page 0, chunk 264: FAIR-RAG architecture with SEA module and iterative refinement cycle.\n\n## Limitations\n\nThe retrieved evidence does not provide detailed architectural diagrams or exhaustive descriptions of all internal components and their interactions. Specific implementation details, such as the exact algorithms used for query reformulation, retrieval, or evidence assessment, are not fully described. Additionally, performance metrics or comparative evaluations of different agentic RAG architectures are only briefly mentioned without in-depth analysis.",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": false,
+      "answer_length": 4929,
+      "num_steps": 3,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": null,
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  },
+  {
+    "case_id": "paper_qa_002",
+    "workflow": "paper_answer",
+    "question": "How does agentic RAG differ from baseline RAG?",
+    "final_answer": "## Answer\n\nAgentic RAG (A-RAG) differs from baseline RAG (B-RAG) primarily in its architecture and retrieval process. While baseline RAG follows a straightforward, sequential retrieval pipeline with specialized agents performing fixed roles (such as query reformulation and single-pass retrieval without document re-ranking), agentic RAG employs a modular, multi-agent system that enables dynamic query decomposition, iterative reasoning, and planning. This structured, multi-agent approach allows A-RAG to refine context and retrieval through autonomous agents that collaborate, improving retrieval precision and relevance at the cost of increased latency. Additionally, A-RAG incorporates advanced features like reflection and tool use to enhance retrieval robustness, which are absent in the simpler baseline system [Source 1, Source 4, Source 5, Source 6].\n\n## Architecture Breakdown\n\n- **Baseline RAG (B-RAG) Components:**\n  - Query Reformulator Agent: Refines user questions into concise, keyword-focused queries using predefined prompt templates.\n  - Retriever Agent: Executes a single-pass retrieval of documents based on the reformulated query.\n  - No document re-ranking step after retrieval, which may reduce final response relevance.\n  - Sequential pipeline with specialized agents in a fixed order [Source 1, Source 5].\n\n- **Agentic RAG (A-RAG) Components:**\n  - Multiple autonomous agents performing planning, reflection, and tool use.\n  - Dynamic query decomposition allowing iterative refinement of queries and retrieval context.\n  - Modular, training-free framework where agents collaboratively process questions using chain-of-thought reasoning.\n  - Incorporation of domain-adaptive agents with task-relevant expertise.\n  - Structured multi-agent architecture enabling iterative reasoning and improved retrieval precision [Source 4, Source 5, Source 6].\n\n## Explanation\n\nThe baseline RAG system (B-RAG) operates as a straightforward pipeline where the user input is first refined by a query reformulator agent into a keyword-focused query. This query is then passed to a retriever agent that performs a single-pass document retrieval. The retrieved documents are used directly without further re-ranking or iterative refinement, which simplifies deployment and reduces computational overhead but may compromise the relevance of the final responses [Source 1, Source 5].\n\nIn contrast, agentic RAG (A-RAG) introduces a modular multi-agent architecture that enables more complex interactions among agents. These agents perform tasks such as planning, reflection, and tool use to iteratively refine the query and retrieval context. This dynamic query decomposition and iterative reasoning allow the system to better handle complex information needs and ambiguities. Agents collaborate using chain-of-thought reasoning, and domain-adaptive agents bring task-specific expertise to improve retrieval precision and relevance. Although this approach increases latency, it significantly enhances retrieval robustness and answer quality in domain-specific settings like fintech [Source 4, Source 5, Source 6].\n\n## Sources Used\n\n- [Source 1] 01_2510.25518v1.pdf, page 2, chunk 435: Baseline RAG system architecture and components.\n- [Source 4] 01_2510.25518v1.pdf, page 1, chunk 430: Introduction to agentic RAG and multi-agent architectures.\n- [Source 5] 01_2510.25518v1.pdf, page 2, chunk 438: Limitations of baseline RAG and description of agentic RAG design.\n- [Source 6] 01_2510.25518v1.pdf, page 1, chunk 431: Details on agentic RAG including planning, reflection, and chain-of-thought reasoning.\n\n## Limitations\n\nThe retrieved evidence does not provide detailed quantitative performance metrics comparing baseline and agentic RAG beyond general statements about improved precision and increased latency. It also lacks explicit descriptions of the internal mechanisms of agent collaboration or specific examples of tool use within agentic RAG. Further details on implementation and evaluation would be needed for a comprehensive comparison.",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": false,
+      "answer_length": 4052,
+      "num_steps": 3,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": null,
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  },
+  {
+    "case_id": "paper_qa_003",
+    "workflow": "paper_answer",
+    "question": "What components are involved in agentic RAG systems?",
+    "final_answer": "## Answer\n\nAgentic RAG systems involve multiple specialized agent components orchestrated to support iterative retrieval and reasoning. Key components include an orchestrator and eight specialized agents responsible for distinct stages in the retrieval–reasoning cycle, such as an Intent Classifier, Query Reformulator, Retriever, and others that enable iterative refinement and targeted exploration of queries [Source 1].\n\n## Architecture Breakdown\n\n- **Orchestrator**: Coordinates the operation of multiple specialized agents in the system [Source 1].\n- **Intent Classifier**: Determines whether the user input requires retrieval of new context or summarization of existing conversation history [Source 1].\n- **Query Reformulator**: Transforms raw queries into optimized search strings by removing function words and focusing on keywords [Source 1, Source 2].\n- **Retriever Agent**: Executes retrieval from the knowledge base, typically in a single pass in baseline systems but iteratively in agentic systems [Source 2].\n- **Sub-query Generator**: Generates targeted sub-queries to explore ambiguous or underspecified queries [Source 3].\n- **Cross-encoder Re-ranker**: Improves relevance of retrieved documents by re-ranking multiple near-matches, though it may introduce latency [Source 3].\n- **Structured Evidence Assessment (SEA) Module**: Analytical gating mechanism that supports iterative refinement and evidence-driven reasoning [Source 4].\n- **Adaptive Routing and Iterative Refinement Cycle**: Architectural features that enable dynamic control flow and iterative improvement of retrieval and reasoning results [Source 4].\n- **Memory Management Components**: Manage working context and external stores to handle growing histories and context windows [Source 5].\n\n## Explanation\n\nThe agentic RAG system is designed as a modular architecture where an orchestrator manages a set of specialized agents, each responsible for a specific function in the retrieval and reasoning workflow. The Intent Classifier first decides if the system should fetch new information or summarize existing data. The Query Reformulator then optimizes the query for retrieval by focusing on dense, keyword-rich search strings. The Retriever Agent fetches relevant documents from the knowledge base, and the Sub-query Generator creates additional targeted queries to handle ambiguous or complex inputs. Retrieved documents are then re-ranked by a Cross-encoder Re-ranker to improve relevance.\n\nThe system employs an iterative refinement cycle, supported by the Structured Evidence Assessment (SEA) module, which gates and assesses evidence to ensure reliability and accuracy. Adaptive routing allows the system to dynamically decide the next steps based on intermediate results. Memory management components maintain a working set of context within the model’s context window and manage external memory stores to handle long or complex interactions.\n\nTogether, these components form a robust, iterative, and modular architecture that improves over static retrieval pipelines by enabling targeted exploration, evidence-based reasoning, and dynamic control flow [Source 1, Source 3, Source 4, Source 5].\n\n## Sources Used\n\n- [Source 1] 01_2510.25518v1.pdf, page 3, chunk 440: Describes the core agent components and orchestrator in A-RAG.\n- [Source 2] 01_2510.25518v1.pdf, page 2, chunk 435: Details baseline RAG and Query Reformulator and Retriever agents.\n- [Source 3] 01_2510.25518v1.pdf, page 6, chunk 458: Discusses sub-query generation, cross-encoder re-ranking, and trade-offs in A-RAG.\n- [Source 4] 01_2510.22344v1.pdf, page 18, chunk 356: Introduces FAIR-RAG architecture components like SEA and iterative refinement.\n- [Source 5] 01_2512.09458v1.pdf, page 10, chunk 508: Covers memory management and control flow in agentic AI systems.\n\n## Limitations\n\nThe retrieved evidence does not provide a complete list or detailed descriptions of all eight specialized agents coordinated by the orchestrator. Also, some components like safety monitors, telemetry, or detailed planner modules mentioned in broader agentic AI architectures are not explicitly detailed in the context of agentic RAG systems here. Further information would be needed to fully enumerate and describe all components and their interactions.",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": false,
+      "answer_length": 4297,
+      "num_steps": 3,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": null,
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  },
+  {
+    "case_id": "paper_report_001",
+    "workflow": "paper_answer",
+    "question": "Explain the architecture of agentic RAG with citations.",
+    "final_answer": "## Answer\n\nAgentic RAG architecture enhances the standard Retrieval-Augmented Generation (RAG) system by integrating multiple specialized autonomous agents that collaboratively perform dynamic query reformulation, iterative sub-query decomposition, evidence assessment, and context re-ranking. This modular pipeline enables complex, multi-hop reasoning and improves retrieval accuracy and factuality in domain-specific tasks. Key components include query reformulator agents, retriever agents, structured evidence assessment modules, and adaptive query refinement agents, which work in an iterative cycle to refine queries and verify evidence until sufficient context is gathered for faithful generation [Source 2][Source 3][Source 7].\n\n## Architecture Breakdown\n\n- **Query Reformulator Agent**: Refines user input into optimized retrieval queries, detecting continuation or new topics using prompt templates [Source 3].\n- **Retriever Agent**: Performs retrieval from a knowledge corpus based on reformulated queries [Source 3].\n- **Structured Evidence Assessment (SEA) Module**: Analytically gates and audits retrieved evidence, identifying confirmed facts and informational gaps [Source 7].\n- **Adaptive Query Refinement Agent**: Generates targeted sub-queries to fill gaps identified by SEA, enabling iterative evidence gathering [Source 7].\n- **Iterative Refinement Cycle**: Governs the repeated process of query refinement, retrieval, and evidence assessment until sufficient context is achieved [Source 7].\n- **Multi-tier Memory Management**: Maintains a fast working set in the model’s context window and pages additional information in and out from external stores, guided by control signals (e.g., MemGPT) [Source 1].\n- **Cross-encoder-based Context Re-ranking**: Improves the relevance of retrieved documents by re-ranking them in context [Source 5].\n\n## Explanation\n\nThe agentic RAG architecture builds upon the baseline RAG system by structuring the retrieval and generation pipeline into multiple specialized agents. Initially, the Query Reformulator Agent processes the user's input to create concise, keyword-focused queries optimized for retrieval. The Retriever Agent then fetches relevant documents from the corpus. Unlike static RAG systems, agentic RAG incorporates the Structured Evidence Assessment (SEA) module, which audits the retrieved evidence to confirm facts and detect missing information. This assessment informs the Adaptive Query Refinement Agent to generate new sub-queries targeting the identified gaps. This iterative refinement cycle repeats, progressively enriching the context until the evidence is sufficient for a final, accurate generation step [Source 3][Source 7].\n\nAdditionally, agentic RAG systems may employ multi-tier memory management strategies, such as maintaining a fast-access working set within the model’s context window and paging information from slower external stores. This approach allows the system to handle effectively unbounded histories and large contexts, improving factuality and enabling updates without retraining [Source 1]. The architecture also leverages cross-encoder-based context re-ranking to enhance retrieval precision, particularly in specialized domains like fintech, where terminology and acronyms complicate retrieval [Source 5].\n\nTogether, these components enable agentic RAG systems to perform complex, multi-hop reasoning tasks with improved accuracy and reliability compared to baseline RAG models.\n\n## Sources Used\n\n- [Source 1] 01_2512.09458v1.pdf, page 10, chunk 508: Multi-tier memory management and context handling in agentic RAG.\n- [Source 2] 01_2510.25518v1.pdf, page 1, chunk 430: Introduction to agentic RAG and its multi-agent pipeline architecture.\n- [Source 3] 01_2510.25518v1.pdf, page 2, chunk 435: Detailed description of baseline RAG and agentic RAG components including query reformulator and retriever agents.\n- [Source 5] 01_2510.25518v1.pdf, page 0, chunk 420: Agentic RAG modular pipeline features including query reformulation and context re-ranking.\n- [Source 7] 01_2510.22344v1.pdf, page 0, chunk 264: FAIR-RAG framework introducing iterative refinement cycle, SEA module, and adaptive query refinement.\n  \n## Limitations\n\nThe retrieved evidence does not provide a complete, formal architectural diagram or exhaustive technical specifications of agentic RAG. Details on implementation specifics, training procedures, or performance metrics beyond qualitative descriptions are missing. Additionally, while FAIR-RAG is described as an example of agentic RAG, the generalizability of its components to all agentic RAG systems is not fully detailed.\n\n---\n\nReport saved: workspace\\reports\\20260611_211205_Explain_the_architecture_of_agentic_RAG_with_citations.md",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": true,
+      "answer_length": 4768,
+      "num_steps": 4,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": null,
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "save_report",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 4,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  }
+]

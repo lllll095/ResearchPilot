@@ -31,7 +31,7 @@ from research_pilot.tools.evidence_answer_tool import WriteEvidenceAnswerTool
 from research_pilot.workflows.paper_workflows import PaperWorkflowRunner
 from research_pilot.workflows.intent_router import IntentRouter, IntentType
 from research_pilot.evaluation.paper_eval import PaperWorkflowEvaluator
-
+from research_pilot.evaluation.llm_judge import PaperAnswerLLMJudge
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -354,16 +354,32 @@ def eval_paper(
         "--max-cases",
         help="Optional maximum number of cases to run.",
     ),
+    use_llm_judge: bool = typer.Option(
+        False,
+        "--llm-judge",
+        help="Use an LLM judge to score groundedness, citation quality, and completeness.",
+    ),
 ):
-    """Evaluate paper workflows with rule-based checks."""
+    """Evaluate paper workflows with rule-based checks and optional LLM judge."""
 
     runner = build_paper_workflow_runner()
 
     output_dir = Path(settings.workspace) / "eval_runs"
 
+    judge = None
+
+    if use_llm_judge:
+        console.print("[cyan]LLM judge enabled. Creating judge client...[/cyan]")
+        judge = PaperAnswerLLMJudge(
+            llm_client=OpenAICompatibleLLMClient.from_settings()
+        )
+    else:
+        console.print("[dim]LLM judge disabled. Running rule-based evaluation only.[/dim]")
+
     evaluator = PaperWorkflowEvaluator(
         runner=runner,
         output_dir=output_dir,
+        llm_judge=judge,
     )
 
     cases = evaluator.load_cases(cases_path)
@@ -379,6 +395,6 @@ def eval_paper(
     console.print(f"Pass rate: {summary.pass_rate:.1%}")
     console.print(f"Results: {summary.results_path}")
     console.print(f"Summary: {summary.summary_path}")
-
+    
 if __name__ == "__main__":
     app()

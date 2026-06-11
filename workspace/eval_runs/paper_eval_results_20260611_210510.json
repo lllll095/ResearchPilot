@@ -1,0 +1,46 @@
+[
+  {
+    "case_id": "paper_qa_001",
+    "workflow": "paper_answer",
+    "question": "What is the architecture of agentic RAG in the indexed papers?",
+    "final_answer": "## Answer\n\nThe architecture of agentic Retrieval-Augmented Generation (RAG) systems in the indexed papers is characterized by a modular, multi-agent pipeline that integrates autonomous agents to enhance retrieval and generation processes. Key components include query reformulation, iterative sub-query decomposition, contextual acronym resolution, and evidence assessment modules that enable dynamic, evidence-driven reasoning cycles. This architecture moves beyond static retrieve-then-read paradigms by incorporating iterative refinement cycles with analytical gating mechanisms to ensure comprehensive and faithful generation outputs [Source 2][Source 3][Source 7].\n\n## Architecture Breakdown\n\n- **Query Reformulator Agent**: Refines user queries into concise, keyword-focused queries optimized for retrieval, detecting continuation or new topics using prompt templates [Source 5].\n- **Retriever Agent**: Executes retrieval from knowledge bases or corpora based on reformulated queries [Source 5].\n- **Iterative Refinement Cycle**: A dynamic process where evidence is assessed, gaps identified, and new targeted sub-queries generated until sufficient evidence is gathered [Source 7].\n- **Structured Evidence Assessment (SEA) Module**: Acts as an analytical gating mechanism that audits aggregated evidence, confirms facts, and identifies information gaps for further querying [Source 7].\n- **Adaptive Query Refinement Agent**: Generates new sub-queries based on SEA feedback to retrieve missing information iteratively [Source 7].\n- **Cross-encoder-based Context Re-ranking**: Improves retrieval accuracy by re-ranking retrieved contexts based on relevance [Source 2].\n- **Modular Specialized Agents**: The architecture supports specialized agents for tasks like acronym resolution and keyphrase extraction to handle domain-specific challenges [Source 2].\n- **Layered Isolation Architecture**: Combines policy-aware ingestion and retrieval-time gating to enforce data isolation and authorization in multi-tenant environments [Source 1].\n\n## Explanation\n\nThe agentic RAG architecture is designed as a modular pipeline where each specialized agent performs a distinct role to improve retrieval and generation quality. Initially, the Query Reformulator Agent processes the user's input to create optimized queries for retrieval. The Retriever Agent then fetches relevant documents or data. Unlike traditional RAG systems, agentic RAG employs an Iterative Refinement Cycle governed by the Structured Evidence Assessment (SEA) module, which systematically evaluates the retrieved evidence, confirming facts and identifying gaps. These gaps trigger the Adaptive Query Refinement Agent to generate new sub-queries, enabling the system to iteratively refine its retrieval until the evidence is sufficient for accurate generation [Source 5][Source 7].\n\nThis iterative, evidence-driven approach allows the system to handle complex, multi-hop queries more reliably than static pipelines. Additionally, the architecture incorporates domain-specific enhancements such as acronym resolution and context re-ranking to address challenges in specialized fields like fintech [Source 2]. In multi-tenant scenarios, a layered isolation architecture is proposed to enforce strict data isolation and authorization, addressing the relevance-authorization gap inherent in retrieval systems [Source 1].\n\nTogether, these components form a dynamic, agentic RAG system that integrates autonomous agents for query management, retrieval, evidence assessment, and generation, enabling more accurate, context-aware, and secure information synthesis [Source 1][Source 2][Source 7].\n\n## Sources Used\n\n- [Source 1] 01_2605.05287v1.pdf, page 1, chunk 558: layered isolation architecture and authorization in agentic RAG.\n- [Source 2] 01_2510.25518v1.pdf, page 0, chunk 420: modular pipeline with specialized agents for query reformulation, acronym resolution, and context re-ranking.\n- [Source 3] 01_2510.25518v1.pdf, page 1, chunk 430: overview of agentic RAG with multi-agent pipelines and dynamic query decomposition.\n- [Source 5] 01_2510.25518v1.pdf, page 2, chunk 435: baseline RAG system components including query reformulator and retriever agents.\n- [Source 7] 01_2510.22344v1.pdf, page 0, chunk 264: FAIR-RAG architecture with iterative refinement cycle, SEA module, and adaptive query refinement.\n- [Source 8] 01_2510.22344v1.pdf, page 19, chunk 358: limitations and performance considerations of FAIR-RAG modular agents.\n\n## Limitations\n\nThe retrieved evidence does not provide a complete, detailed architectural diagram or exhaustive component specifications for agentic RAG systems. Specific implementation details, such as exact model architectures, training procedures, or integration protocols between agents, are not fully described. Additionally, while FAIR-RAG is detailed, other agentic RAG variants or comparative evaluations are less covered.",
+    "metrics": {
+      "workflow_success": true,
+      "no_tool_error": true,
+      "has_answer_section": true,
+      "has_architecture_breakdown": true,
+      "has_sources_used": true,
+      "has_limitations": true,
+      "has_citations": true,
+      "report_saved": false,
+      "answer_length": 4932,
+      "num_steps": 3,
+      "num_tool_errors": 0,
+      "passed": true
+    },
+    "llm_judge": null,
+    "trace_like_steps": [
+      {
+        "step_id": 1,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "engineered_rag_search",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 2,
+        "action_type": "ActionType.TOOL_CALL",
+        "tool_name": "write_evidence_answer",
+        "observation_success": true,
+        "observation_error": null
+      },
+      {
+        "step_id": 3,
+        "action_type": "ActionType.FINAL_ANSWER",
+        "tool_name": null,
+        "observation_success": null,
+        "observation_error": null
+      }
+    ]
+  }
+]
