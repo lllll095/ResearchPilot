@@ -23,15 +23,17 @@ class ConversationContextBuilder:
 
         if session.summary.strip():
             sections.append(
-                "Conversation summary:\n"
+                "Persistent session summary:\n"
                 f"{session.summary.strip()}"
             )
 
         if recent_messages:
             history_lines = []
+
             for message in recent_messages:
                 role = message.role
                 content = message.content.strip()
+
                 if not content:
                     continue
 
@@ -40,7 +42,7 @@ class ConversationContextBuilder:
             if history_lines:
                 sections.append(
                     "Recent conversation history:\n"
-                    + "\n".join(history_lines)
+                    + "\n\n".join(history_lines)
                 )
 
         sections.append(
@@ -50,9 +52,10 @@ class ConversationContextBuilder:
 
         sections.append(
             "Instruction:\n"
-            "Use the conversation history only to resolve references such as "
-            "'it', 'that', 'the previous tool', or '刚才那个'. "
-            "Answer the current user request directly."
+            "Use the persistent summary and recent conversation history only to resolve "
+            "references such as 'it', 'that', 'the previous tool', '刚才那个', or '继续'. "
+            "Answer the current user request directly. Do not summarize the conversation "
+            "unless the user asks for a summary."
         )
 
-        return "\n\n".join(sections)
+        return "\n\n---\n\n".join(sections)

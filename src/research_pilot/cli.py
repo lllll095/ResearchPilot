@@ -43,6 +43,8 @@ from research_pilot.workflows.code_workflows import CodeWorkflowRunner
 from research_pilot.evaluation.code_eval import CodeWorkflowEvaluator
 from research_pilot.conversation.conversation_context import ConversationContextBuilder
 from research_pilot.conversation.session_store import ConversationSessionStore
+from research_pilot.conversation.summarizer import ConversationSummarizer
+from research_pilot.core.llm_client import OpenAICompatibleLLMClient
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -449,12 +451,33 @@ def chat(
         "--code-path",
         help="Code path to inspect when routed to code-answer.",
     ),
+    summarize: bool = typer.Option(
+        True,
+        "--summarize/--no-summarize",
+        help="Whether to compress older chat history into a session summary.",
+    ),
+    summary_keep_recent: int = typer.Option(
+        8,
+        "--summary-keep-recent",
+        help="Number of recent messages to keep outside the compressed summary.",
+    ),
+    summary_min_new_messages: int = typer.Option(
+        4,
+        "--summary-min-new-messages",
+        help="Minimum new old messages required before updating the summary.",
+    ),
 ):
     """Start an interactive multi-turn ResearchPilot chat session."""
 
     store = ConversationSessionStore()
     session = store.load_or_create(session_id)
     context_builder = ConversationContextBuilder(max_messages=max_history)
+    summarizer = None
+
+    if summarize:
+        summarizer = ConversationSummarizer(
+            llm_client=OpenAICompatibleLLMClient.from_settings()
+        )
 
     console.print("[bold green]ResearchPilot chat started.[/bold green]")
     console.print(f"[dim]Session: {session.session_id}[/dim]")
@@ -516,9 +539,28 @@ def chat(
                 "mode": "chat",
             },
         )
+
+        summary_updated = False
+
+        if summarizer is not None:
+            try:
+                summary_updated = summarizer.maybe_summarize(
+                    session=session,
+                    keep_recent=summary_keep_recent,
+                    min_new_messages=summary_min_new_messages,
+                )
+            except Exception as exc:
+                console.print(
+                    "[yellow]Session summarization failed, but chat history was preserved.[/yellow]"
+                )
+                console.print(f"[dim]{type(exc).__name__}: {exc}[/dim]")
+
         path = store.save(session)
 
         console.print(f"[dim]Session saved to: {path}[/dim]")
+
+        if summary_updated:
+            console.print("[dim]Session summary updated.[/dim]")
 
 @app.command("eval-paper")
 def eval_paper(
@@ -644,6 +686,47 @@ def eval_code(
     console.print(f"Pass rate: {summary.pass_rate:.1%}")
     console.print(f"Results: {summary.results_path}")
     console.print(f"Summary: {summary.summary_path}")
+
+@app.command("session-show")
+def session_show(
+    session_id: str = typer.Option(
+        "default",
+        "--session",
+        "-s",
+        help="Conversation session id.",
+    ),
+    max_messages: int = typer.Option(
+        10,
+        "--max-messages",
+        help="Maximum recent raw messages to show.",
+    ),
+):
+    """Show a saved conversation session."""
+
+    store = ConversationSessionStore()
+    session = store.load_or_create(session_id)
+
+    console.rule(f"[bold green]Session: {session.session_id}")
+
+    console.print(f"[cyan]Created:[/cyan] {session.created_at}")
+    console.print(f"[cyan]Updated:[/cyan] {session.updated_at}")
+    console.print(f"[cyan]Messages:[/cyan] {len(session.messages)}")
+    console.print(
+        f"[cyan]Summarized message count:[/cyan] "
+        f"{session.metadata.get('summarized_message_count', 0)}"
+    )
+
+    console.rule("[bold blue]Summary")
+    console.print(session.summary or "[dim](empty)[/dim]")
+
+    console.rule("[bold blue]Recent Messages")
+
+    for message in session.recent_messages(max_messages):
+        console.print(f"[bold]{message.role}[/bold] [{message.created_at}]")
+        console.print(message.content[:1500])
+        if len(message.content) > 1500:
+            console.print("[dim]... truncated ...[/dim]")
+        console.print()
 
 if __name__ == "__main__":
     app()
