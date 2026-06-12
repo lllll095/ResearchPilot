@@ -41,6 +41,8 @@ from research_pilot.tools.codebase_tools import (
 from research_pilot.tools.code_answer_tool import WriteCodeAnswerTool
 from research_pilot.workflows.code_workflows import CodeWorkflowRunner
 from research_pilot.evaluation.code_eval import CodeWorkflowEvaluator
+from research_pilot.conversation.conversation_context import ConversationContextBuilder
+from research_pilot.conversation.session_store import ConversationSessionStore
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -148,6 +150,55 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
         max_steps=12,
     )
 
+def run_ask_request(
+    user_input: str,
+    max_papers: int = 3,
+    min_sources: int = 3,
+    force_download: bool = False,
+    save_report: bool = False,
+    code_path: str = "src/research_pilot",
+):
+    """Run one routed ask request and return the final AgentState."""
+
+    router = IntentRouter()
+    routed = router.route(user_input)
+
+    console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
+    console.print(f"[cyan]Reason:[/cyan] {routed.reason}")
+
+    if routed.intent_type == IntentType.CODE_ANSWER:
+        code_runner = build_code_workflow_runner()
+
+        return code_runner.code_answer(
+            question=user_input,
+            path=code_path,
+        )
+
+    runner = build_paper_workflow_runner()
+
+    if routed.intent_type == IntentType.PAPER_COLLECT:
+        return runner.paper_collect(
+            topic=user_input,
+            max_papers=routed.max_papers or max_papers,
+            rebuild_index=True,
+        )
+
+    if routed.intent_type == IntentType.PAPER_RESEARCH:
+        return runner.paper_research(
+            question=user_input,
+            max_papers=routed.max_papers or max_papers,
+            force_download=force_download or routed.force_download,
+            save_report=save_report or routed.save_report,
+        )
+
+    if routed.intent_type == IntentType.PAPER_ANSWER:
+        return runner.paper_answer(
+            question=user_input,
+            save_report=save_report or routed.save_report,
+        )
+
+    loop = build_runtime(policy_name="llm")
+    return loop.run(user_input)
 
 @app.command()
 def run(
@@ -325,15 +376,25 @@ def paper_research(
 @app.command("ask")
 def ask(
     user_input: str,
+    max_papers: int = typer.Option(
+        3,
+        "--max-papers",
+        help="Maximum papers to download when needed.",
+    ),
+    min_sources: int = typer.Option(
+        3,
+        "--min-sources",
+        help="Minimum sources required before skipping download.",
+    ),
     force_download: bool = typer.Option(
         False,
         "--force-download",
-        help="Force downloading new papers before answering.",
+        help="Force downloading new papers.",
     ),
     save_report: bool = typer.Option(
         False,
         "--save-report",
-        help="Save the final answer as a report.",
+        help="Save final answer as a report.",
     ),
     code_path: str = typer.Option(
         "src/research_pilot",
@@ -341,61 +402,123 @@ def ask(
         help="Code path to inspect when routed to code-answer.",
     ),
 ):
-    """Ask ResearchPilot a natural language question.
+    """Ask a natural-language question and route it to the right workflow."""
 
-    This command routes the request to a stable workflow when possible.
-    """
+    result = run_ask_request(
+        user_input=user_input,
+        max_papers=max_papers,
+        min_sources=min_sources,
+        force_download=force_download,
+        save_report=save_report,
+        code_path=code_path,
+    )
 
-    router = IntentRouter()
-    routed = router.route(user_input)
-
-    console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
-    console.print(f"[dim]Reason: {routed.reason}[/dim]")
-
-    runner = build_paper_workflow_runner()
-
-    if routed.intent_type == IntentType.CODE_ANSWER:
-        code_runner = build_code_workflow_runner()
-
-        result = code_runner.code_answer(
-            question=user_input,
-            path=code_path,
-        )
-
-        console.rule("[bold green]Code Answer")
-        console.print(result.final_answer)
-    
-    elif routed.intent_type == IntentType.PAPER_ANSWER:
-        result = runner.paper_answer(
-            question=user_input,
-            save_report=save_report,
-        )
-
-    elif routed.intent_type == IntentType.PAPER_COLLECT:
-        result = runner.paper_collect(
-            topic=user_input,
-            max_papers=routed.max_papers,
-            rebuild_index=True,
-        )
-
-    elif routed.intent_type == IntentType.PAPER_RESEARCH:
-        result = runner.paper_research(
-            question=user_input,
-            max_papers=routed.max_papers,
-            force_download=force_download or routed.force_download,
-            save_report=save_report or routed.save_report,
-        )
-
-
-    else:
-        console.print(
-            "[yellow]Falling back to general Agent run. "
-            "For now, use `research-pilot run --policy llm ...` for open-ended tasks.[/yellow]"
-        )
-        return
-
-    console.rule("[bold green]ResearchPilot Answer")
+    console.rule("[bold green]Answer")
     console.print(result.final_answer)
+
+@app.command("chat")
+def chat(
+    session_id: str = typer.Option(
+        "default",
+        "--session",
+        "-s",
+        help="Conversation session id.",
+    ),
+    max_history: int = typer.Option(
+        8,
+        "--max-history",
+        help="Maximum recent messages to inject into the current request.",
+    ),
+    max_papers: int = typer.Option(
+        3,
+        "--max-papers",
+        help="Maximum papers to download when needed.",
+    ),
+    force_download: bool = typer.Option(
+        False,
+        "--force-download",
+        help="Force downloading new papers.",
+    ),
+    save_report: bool = typer.Option(
+        False,
+        "--save-report",
+        help="Save final answer as a report.",
+    ),
+    code_path: str = typer.Option(
+        "src/research_pilot",
+        "--code-path",
+        help="Code path to inspect when routed to code-answer.",
+    ),
+):
+    """Start an interactive multi-turn ResearchPilot chat session."""
+
+    store = ConversationSessionStore()
+    session = store.load_or_create(session_id)
+    context_builder = ConversationContextBuilder(max_messages=max_history)
+
+    console.print("[bold green]ResearchPilot chat started.[/bold green]")
+    console.print(f"[dim]Session: {session.session_id}[/dim]")
+    console.print("[dim]Type 'exit', 'quit', 'q', or '退出' to stop.[/dim]")
+
+    while True:
+        try:
+            user_message = console.input("\n[bold cyan]You > [/bold cyan]").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]Chat stopped.[/yellow]")
+            break
+
+        if not user_message:
+            continue
+
+        if user_message.lower() in {"exit", "quit", "q", "bye"} or user_message in {
+            "退出",
+            "结束",
+        }:
+            console.print("[yellow]Chat stopped.[/yellow]")
+            break
+
+        contextual_input = context_builder.build_user_input(
+            session=session,
+            current_user_input=user_message,
+        )
+
+        session.add_message(
+            role="user",
+            content=user_message,
+        )
+        store.save(session)
+
+        try:
+            result = run_ask_request(
+                user_input=contextual_input,
+                max_papers=max_papers,
+                force_download=force_download,
+                save_report=save_report,
+                code_path=code_path,
+            )
+
+            answer = result.final_answer or ""
+
+        except Exception as exc:
+            answer = (
+                "The chat turn failed.\n\n"
+                f"Error type: {type(exc).__name__}\n"
+                f"Error message: {exc}"
+            )
+
+        console.rule("[bold green]Assistant")
+        console.print(answer)
+
+        session.add_message(
+            role="assistant",
+            content=answer,
+            metadata={
+                "mode": "chat",
+            },
+        )
+        path = store.save(session)
+
+        console.print(f"[dim]Session saved to: {path}[/dim]")
 
 @app.command("eval-paper")
 def eval_paper(
