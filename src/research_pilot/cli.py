@@ -40,6 +40,7 @@ from research_pilot.tools.codebase_tools import (
 )
 from research_pilot.tools.code_answer_tool import WriteCodeAnswerTool
 from research_pilot.workflows.code_workflows import CodeWorkflowRunner
+from research_pilot.evaluation.code_eval import CodeWorkflowEvaluator
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
@@ -482,6 +483,44 @@ def code_answer(
 
     console.rule("[bold green]Code Answer")
     console.print(result.final_answer)
+
+@app.command("eval-code")
+def eval_code(
+    cases_path: Path = typer.Option(
+        Path("eval/code_eval_cases.jsonl"),
+        "--cases",
+        help="Path to JSONL code evaluation cases.",
+    ),
+    max_cases: int | None = typer.Option(
+        None,
+        "--max-cases",
+        help="Optional maximum number of cases to run.",
+    ),
+):
+    """Evaluate code-answer workflow with rule-based checks."""
+
+    runner = build_code_workflow_runner()
+
+    output_dir = Path(settings.workspace) / "eval_runs"
+
+    evaluator = CodeWorkflowEvaluator(
+        runner=runner,
+        output_dir=output_dir,
+    )
+
+    cases = evaluator.load_cases(cases_path)
+    summary = evaluator.run_cases(
+        cases=cases,
+        max_cases=max_cases,
+    )
+
+    console.rule("[bold green]Code Evaluation Summary")
+    console.print(f"Total: {summary.total}")
+    console.print(f"Passed: {summary.passed}")
+    console.print(f"Failed: {summary.failed}")
+    console.print(f"Pass rate: {summary.pass_rate:.1%}")
+    console.print(f"Results: {summary.results_path}")
+    console.print(f"Summary: {summary.summary_path}")
 
 if __name__ == "__main__":
     app()
