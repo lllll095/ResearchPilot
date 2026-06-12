@@ -32,10 +32,54 @@ class LLMAgentPolicy:
         "engineered_rag_search",
         "engineered_rag_answer",
         "write_evidence_answer",
+        "code_map",
+        "code_search",
+        "code_read",
     }
 
-    def __init__(self, llm_client: OpenAICompatibleLLMClient):
+    def __init__(self, llm_client, tool_specs):
         self.llm_client = llm_client
+        self.tool_specs = tool_specs
+
+        self.KNOWN_TOOLS = self._extract_known_tools(tool_specs)
+
+        # print(f"[LLMAgentPolicy] Known tools: {sorted(self.KNOWN_TOOLS)}")
+
+    def _extract_known_tools(self, tool_specs) -> set[str]:
+        """Extract available tool names from tool specs.
+
+        This makes the LLM action normalizer automatically recognize newly
+        registered tools, such as code_map, code_search, and code_read.
+        """
+
+        known_tools: set[str] = set()
+
+        if tool_specs is None:
+            return known_tools
+
+        # Case 1: tool_specs is a dict: {"tool_name": spec}
+        if isinstance(tool_specs, dict):
+            for name in tool_specs.keys():
+                known_tools.add(str(name).lower().strip())
+
+            for spec in tool_specs.values():
+                name = getattr(spec, "name", None)
+                if name:
+                    known_tools.add(str(name).lower().strip())
+
+            return known_tools
+
+        # Case 2: tool_specs is a list of ToolSpec objects or dicts
+        for spec in tool_specs:
+            if isinstance(spec, dict):
+                name = spec.get("name")
+            else:
+                name = getattr(spec, "name", None)
+
+            if name:
+                known_tools.add(str(name).lower().strip())
+
+        return known_tools
 
     def next_action(self, state: AgentState, context: str) -> AgentAction:
         passthrough_action = self._passthrough_last_evidence_answer(state)
@@ -155,6 +199,20 @@ Evidence answer rules:
 - Do not call read_file on source filenames returned by engineered_rag_search.
 - After write_evidence_answer succeeds, return its full output as final_answer. Do not summarize, shorten, or rewrite it.
 
+Codebase tools:
+- For codebase implementation questions, use code_search and code_read, not read_file.
+- code_search defaults to the current project source code.
+- Prefer src/research_pilot over docs or external reference projects.
+- Do not read files from helloagents-chapter14 unless the user explicitly asks about HelloAgents chapter code.
+- If code_search returns docs before source files, refine the search with path="src/research_pilot".
+- To read code, use code_read with start_line and max_lines or end_line.
+
+Important action schema rule:
+- Tool names are never action_type.
+- To call a tool, always use action_type="tool_call" and put the tool name in tool_name.
+- Correct example: {"action_type":"tool_call","tool_name":"code_read","tool_input":{"path":"src/research_pilot/core/agent_loop.py"}}
+- Wrong example: {"action_type":"code_read","tool_input":{"path":"src/research_pilot/core/agent_loop.py"}}
+
 Tool rules:
 - Use only tools listed in the context.
 - Prefer list_files and read_file before using shell for code or file inspection tasks.
@@ -198,12 +256,18 @@ Tool rules:
         raw_action_type = str(payload.get("action_type", "")).lower().strip()
         tool_name = payload.get("tool_name")
 
+        known_tools = {str(name).lower().strip() for name in self.KNOWN_TOOLS}
+
         # Common variants for tool calls.
         if raw_action_type in {"tool_call", "tool", "call_tool", "use_tool"}:
             payload["action_type"] = "tool_call"
 
         # Sometimes the LLM incorrectly uses the tool name as action_type.
-        elif raw_action_type in self.KNOWN_TOOLS:
+        # Example:
+        # {"action_type": "code_read", "tool_input": {"path": "..."}}
+        # becomes:
+        # {"action_type": "tool_call", "tool_name": "code_read", "tool_input": {"path": "..."}}
+        elif raw_action_type in known_tools:
             payload["action_type"] = "tool_call"
             payload.setdefault("tool_name", raw_action_type)
 
@@ -230,6 +294,8 @@ Tool rules:
                     payload["tool_input"] = payload.pop("input")
                 elif "arguments" in payload:
                     payload["tool_input"] = payload.pop("arguments")
+                elif "args" in payload:
+                    payload["tool_input"] = payload.pop("args")
                 else:
                     # If the model puts tool arguments at top level, collect them.
                     reserved = {
@@ -237,6 +303,7 @@ Tool rules:
                         "tool_name",
                         "tool_input",
                         "final_answer",
+                        "answer",
                         "thought_summary",
                     }
                     inferred_input = {
@@ -245,6 +312,9 @@ Tool rules:
                         if key not in reserved
                     }
                     payload["tool_input"] = inferred_input
+
+            if payload.get("tool_input") is None:
+                payload["tool_input"] = {}
 
             if payload.get("tool_name") is None:
                 raise ValueError("tool_call requires tool_name")
