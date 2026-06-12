@@ -7,6 +7,7 @@ class IntentType(str, Enum):
     PAPER_COLLECT = "paper_collect"
     PAPER_RESEARCH = "paper_research"
     GENERAL_AGENT_RUN = "general_agent_run"
+    CODE_ANSWER = "code_answer"
 
 
 class RoutedIntent(BaseModel):
@@ -88,6 +89,15 @@ class IntentRouter:
 
         max_papers = self._extract_max_papers(text)
 
+        if _looks_like_code_question(user_input):
+            return RoutedIntent(
+                intent_type=IntentType.CODE_ANSWER,
+                reason="The user asks to search/download papers.",
+                max_papers=max_papers,
+                save_report=False,
+                force_download=True,
+            )
+
         if wants_download and not asks_question:
             return RoutedIntent(
                 intent_type=IntentType.PAPER_COLLECT,
@@ -139,3 +149,87 @@ class IntentRouter:
                 return n
 
         return 3
+    
+def _looks_like_code_question(text: str) -> bool:
+    """Return whether the user is asking about codebase implementation."""
+
+    q = text.lower()
+
+    code_keywords = {
+        "code",
+        "codebase",
+        "implementation",
+        "implemented",
+        "function",
+        "class",
+        "method",
+        "module",
+        "file",
+        "where is",
+        "where does",
+        "how does",
+        "explain how",
+        "trace",
+        "workflow",
+        "agentloop",
+        "toolruntime",
+        "evidencestore",
+        "engineeredrag",
+        "subprocess",
+        "chroma",
+        "worker",
+        "cli",
+        "intent router",
+        "permissionchecker",
+        "contextmanager",
+        "tracestore",
+        "write_code_answer",
+        "code_search",
+        "code_read",
+        "paperworkflowrunner",
+    }
+
+    chinese_keywords = {
+        "代码",
+        "源码",
+        "实现",
+        "在哪里",
+        "在哪",
+        "函数",
+        "类",
+        "方法",
+        "模块",
+        "文件",
+        "调用链",
+        "执行流程",
+        "工作流",
+        "怎么实现",
+        "如何实现",
+        "怎么运行",
+        "怎么调用",
+        "代码里",
+        "项目里",
+    }
+
+    if any(keyword in q for keyword in code_keywords):
+        return True
+
+    if any(keyword in text for keyword in chinese_keywords):
+        return True
+
+    code_like_tokens = {
+        "AgentLoop",
+        "ToolRuntime",
+        "EvidenceStore",
+        "CodeWorkflowRunner",
+        "PaperWorkflowRunner",
+        "LLMAgentPolicy",
+        "PermissionChecker",
+        "ContextManager",
+        "TraceStore",
+        "CodeSearchTool",
+        "CodeReadTool",
+        "WriteCodeAnswerTool",
+    }
+
+    return any(token in text for token in code_like_tokens)

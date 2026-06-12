@@ -334,6 +334,11 @@ def ask(
         "--save-report",
         help="Save the final answer as a report.",
     ),
+    code_path: str = typer.Option(
+        "src/research_pilot",
+        "--code-path",
+        help="Code path to inspect when routed to code-answer.",
+    ),
 ):
     """Ask ResearchPilot a natural language question.
 
@@ -348,7 +353,18 @@ def ask(
 
     runner = build_paper_workflow_runner()
 
-    if routed.intent_type == IntentType.PAPER_ANSWER:
+    if routed.intent_type == IntentType.CODE_ANSWER:
+        code_runner = build_code_workflow_runner()
+
+        result = code_runner.code_answer(
+            question=user_input,
+            path=code_path,
+        )
+
+        console.rule("[bold green]Code Answer")
+        console.print(result.final_answer)
+    
+    elif routed.intent_type == IntentType.PAPER_ANSWER:
         result = runner.paper_answer(
             question=user_input,
             save_report=save_report,
@@ -368,6 +384,7 @@ def ask(
             force_download=force_download or routed.force_download,
             save_report=save_report or routed.save_report,
         )
+
 
     else:
         console.print(
