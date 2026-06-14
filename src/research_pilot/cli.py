@@ -464,6 +464,11 @@ def chat(
         "-s",
         help="Conversation session id.",
     ),
+    multi_agent: bool = typer.Option(
+        False,
+        "--multi-agent",
+        help="Use the multi-agent planner/subagent workflow.",
+    ),
     max_history: int = typer.Option(
         8,
         "--max-history",
@@ -528,6 +533,8 @@ def chat(
 
     console.print("[bold green]ResearchPilot chat started.[/bold green]")
     console.print(f"[dim]Session: {session.session_id}[/dim]")
+    mode_name = "multi-agent" if multi_agent else "single-workflow"
+    console.print(f"[dim]Mode: {mode_name}[/dim]")
     console.print("[dim]Type 'exit', 'quit', 'q', or '退出' to stop.[/dim]")
 
     while True:
@@ -561,16 +568,22 @@ def chat(
         turn_memory = None
 
         try:
-            result = run_ask_request(
-                user_input=contextual_input,
-                max_papers=max_papers,
-                force_download=force_download,
-                save_report=save_report,
-                code_path=code_path,
-                verbose=verbose,
-            )
+            if multi_agent:
+                runner = build_multiagent_workflow_runner(verbose=verbose)
 
-            answer = result.final_answer or ""
+                result = runner.answer(
+                    user_request=contextual_input,
+                    session=session,
+                )
+            else:
+                result = run_ask_request(
+                    user_input=contextual_input,
+                    max_papers=max_papers,
+                    force_download=force_download,
+                    save_report=save_report,
+                    code_path=code_path,
+                    verbose=verbose,
+                )
 
             answer = result.final_answer or ""
 
