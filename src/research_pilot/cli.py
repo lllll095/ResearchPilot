@@ -1,4 +1,5 @@
 from pathlib import Path
+from io import StringIO
 
 import typer
 from rich.console import Console
@@ -45,11 +46,24 @@ from research_pilot.conversation.conversation_context import ConversationContext
 from research_pilot.conversation.session_store import ConversationSessionStore
 from research_pilot.conversation.summarizer import ConversationSummarizer
 from research_pilot.core.llm_client import OpenAICompatibleLLMClient
+from research_pilot.conversation.turn_memory import TurnMemoryExtractor
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
 
-def build_paper_workflow_runner() -> PaperWorkflowRunner:
+def get_runtime_console(verbose: bool = True) -> Console:
+    """Return normal console for verbose mode, otherwise a silent console."""
+
+    if verbose:
+        return console
+
+    return Console(
+        file=StringIO(),
+        force_terminal=False,
+        width=120,
+    )
+
+def build_paper_workflow_runner(verbose: bool = True) -> PaperWorkflowRunner:
     """Build deterministic paper workflow runner."""
 
     loop = build_runtime(policy_name="llm")
@@ -57,10 +71,10 @@ def build_paper_workflow_runner() -> PaperWorkflowRunner:
     return PaperWorkflowRunner(
         tool_runtime=loop.tool_runtime,
         trace_store=loop.trace_store,
-        console=console,
+        console=get_runtime_console(verbose),
     )
 
-def build_code_workflow_runner() -> CodeWorkflowRunner:
+def build_code_workflow_runner(verbose: bool = True) -> CodeWorkflowRunner:
     """Build deterministic code workflow runner."""
 
     loop = build_runtime(policy_name="llm")
@@ -68,7 +82,7 @@ def build_code_workflow_runner() -> CodeWorkflowRunner:
     return CodeWorkflowRunner(
         tool_runtime=loop.tool_runtime,
         trace_store=loop.trace_store,
-        console=console,
+        console=get_runtime_console(verbose),
     )
 
 def build_policy(policy_name: str, tool_runtime=None):
@@ -101,7 +115,7 @@ def build_policy(policy_name: str, tool_runtime=None):
     raise ValueError(f"Unknown policy: {policy_name}. Use 'mock' or 'llm'.")
 
 
-def build_runtime(policy_name: str = "mock") -> AgentLoop:
+def build_runtime(policy_name: str = "mock", verbose: bool = True) -> AgentLoop:
     workspace = Path(settings.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
 
@@ -150,6 +164,7 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
         trace_store=trace_store,
         hook_manager=hook_manager,
         max_steps=12,
+        console=get_runtime_console(verbose),
     )
 
 def run_ask_request(
@@ -159,24 +174,26 @@ def run_ask_request(
     force_download: bool = False,
     save_report: bool = False,
     code_path: str = "src/research_pilot",
+    verbose: bool = True,
 ):
     """Run one routed ask request and return the final AgentState."""
 
     router = IntentRouter()
     routed = router.route(user_input)
 
-    console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
-    console.print(f"[cyan]Reason:[/cyan] {routed.reason}")
+    if verbose:
+        console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
+        console.print(f"[cyan]Reason:[/cyan] {routed.reason}")
 
     if routed.intent_type == IntentType.CODE_ANSWER:
-        code_runner = build_code_workflow_runner()
+        code_runner = build_code_workflow_runner(verbose=verbose)
 
         return code_runner.code_answer(
             question=user_input,
             path=code_path,
         )
 
-    runner = build_paper_workflow_runner()
+    runner = build_paper_workflow_runner(verbose=verbose)
 
     if routed.intent_type == IntentType.PAPER_COLLECT:
         return runner.paper_collect(
@@ -199,7 +216,7 @@ def run_ask_request(
             save_report=save_report or routed.save_report,
         )
 
-    loop = build_runtime(policy_name="llm")
+    loop = build_runtime(policy_name="llm", verbose=verbose)
     return loop.run(user_input)
 
 @app.command()
@@ -403,6 +420,11 @@ def ask(
         "--code-path",
         help="Code path to inspect when routed to code-answer.",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Only print the final answer.",
+    ),
 ):
     """Ask a natural-language question and route it to the right workflow."""
 
@@ -413,6 +435,7 @@ def ask(
         force_download=force_download,
         save_report=save_report,
         code_path=code_path,
+        verbose=not quiet,
     )
 
     console.rule("[bold green]Answer")
@@ -466,12 +489,21 @@ def chat(
         "--summary-min-new-messages",
         help="Minimum new old messages required before updating the summary.",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Show internal routing and workflow steps.",
+    ),
 ):
     """Start an interactive multi-turn ResearchPilot chat session."""
 
     store = ConversationSessionStore()
     session = store.load_or_create(session_id)
-    context_builder = ConversationContextBuilder(max_messages=max_history)
+    context_builder = ConversationContextBuilder(
+        max_messages=max_history,
+        max_turn_memories=4,
+    )
+    turn_memory_extractor = TurnMemoryExtractor()
     summarizer = None
 
     if summarize:
@@ -511,6 +543,8 @@ def chat(
         )
         store.save(session)
 
+        turn_memory = None
+
         try:
             result = run_ask_request(
                 user_input=contextual_input,
@@ -518,9 +552,17 @@ def chat(
                 force_download=force_download,
                 save_report=save_report,
                 code_path=code_path,
+                verbose=verbose,
             )
 
             answer = result.final_answer or ""
+
+            answer = result.final_answer or ""
+
+            turn_memory = turn_memory_extractor.extract(
+                user_input=user_message,
+                state=result,
+            )
 
         except Exception as exc:
             answer = (
@@ -529,15 +571,20 @@ def chat(
                 f"Error message: {exc}"
             )
 
-        console.rule("[bold green]Assistant")
+        console.print("\n[bold green]Assistant >[/bold green]")
         console.print(answer)
+
+        assistant_metadata = {
+            "mode": "chat",
+        }
+
+        if turn_memory is not None:
+            assistant_metadata["turn_memory"] = turn_memory.model_dump()
 
         session.add_message(
             role="assistant",
             content=answer,
-            metadata={
-                "mode": "chat",
-            },
+            metadata=assistant_metadata,
         )
 
         summary_updated = False
@@ -557,10 +604,11 @@ def chat(
 
         path = store.save(session)
 
-        console.print(f"[dim]Session saved to: {path}[/dim]")
+        if verbose:
+            console.print(f"[dim]Session saved to: {path}[/dim]")
 
-        if summary_updated:
-            console.print("[dim]Session summary updated.[/dim]")
+            if summary_updated:
+                console.print("[dim]Session summary updated.[/dim]")
 
 @app.command("eval-paper")
 def eval_paper(
@@ -687,6 +735,7 @@ def eval_code(
     console.print(f"Results: {summary.results_path}")
     console.print(f"Summary: {summary.summary_path}")
 
+
 @app.command("session-show")
 def session_show(
     session_id: str = typer.Option(
@@ -699,6 +748,11 @@ def session_show(
         10,
         "--max-messages",
         help="Maximum recent raw messages to show.",
+    ),
+    show_memory: bool = typer.Option(
+        True,
+        "--show-memory/--no-show-memory",
+        help="Show compact structured turn memory.",
     ),
 ):
     """Show a saved conversation session."""
@@ -727,6 +781,61 @@ def session_show(
         if len(message.content) > 1500:
             console.print("[dim]... truncated ...[/dim]")
         console.print()
+
+    # 这一段放在 Recent Messages 的 for 循环之后。
+    # 注意：if show_memory 要和上面的 for message 对齐，不要缩进到 for 里面。
+    if show_memory:
+        console.rule("[bold blue]Recent Turn Memory")
+
+        count = 0
+
+        for message in reversed(session.messages):
+            if message.role != "assistant":
+                continue
+
+            memory = message.metadata.get("turn_memory")
+            if not isinstance(memory, dict):
+                continue
+
+            count += 1
+            console.print(f"[bold]Turn memory {count}[/bold]")
+
+            user_input = memory.get("user_input")
+            if user_input:
+                console.print(f"[cyan]User input:[/cyan] {user_input}")
+
+            code_files = memory.get("code_files") or []
+            if code_files:
+                console.print("[cyan]Code files:[/cyan]")
+                for file in code_files[:10]:
+                    console.print(f"- {file}")
+
+            code_search_queries = memory.get("code_search_queries") or []
+            if code_search_queries:
+                console.print("[cyan]Code search queries:[/cyan]")
+                for query in code_search_queries[:10]:
+                    console.print(f"- {query}")
+
+            evidence_sources = memory.get("evidence_sources") or []
+            if evidence_sources:
+                console.print("[cyan]Evidence sources:[/cyan]")
+                for source in evidence_sources[:10]:
+                    console.print(f"- {source}")
+
+            report_paths = memory.get("report_paths") or []
+            if report_paths:
+                console.print("[cyan]Report paths:[/cyan]")
+                for path in report_paths[:10]:
+                    console.print(f"- {path}")
+
+            console.print()
+
+            if count >= 5:
+                break
+
+        if count == 0:
+            console.print("[dim](no structured turn memory found)[/dim]")
+
 
 if __name__ == "__main__":
     app()
