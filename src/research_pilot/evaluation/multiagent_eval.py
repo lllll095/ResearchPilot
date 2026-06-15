@@ -85,7 +85,7 @@ class MultiAgentWorkflowEvaluator:
 
     def __init__(
         self,
-        runner: MultiAgentWorkflowRunner,
+        runner: Any,
         output_dir: Path,
     ):
         self.runner = runner

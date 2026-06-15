@@ -626,7 +626,12 @@ def chat(
     use_graph: bool = typer.Option(
         False,
         "--graph",
-        help="Use graph-based multi-agent workflow. Only works with --multi-agent.",
+        help="Deprecated compatibility flag. Graph runner is now the default for --multi-agent.",
+    ),
+    legacy_multi_agent: bool = typer.Option(
+        False,
+        "--legacy-multi-agent",
+        help="Use legacy if/else multi-agent runner instead of graph runner.",
     ),
     show_graph: bool = typer.Option(
         False,
@@ -679,16 +684,19 @@ def chat(
     )
 
     multiagent_runner = None
+    multiagent_runner_is_graph = False
 
     if multi_agent:
-        if use_graph:
-            multiagent_runner = build_multiagent_graph_workflow_runner(
-                verbose=verbose,
-            )
-        else:
+        if legacy_multi_agent:
             multiagent_runner = build_multiagent_workflow_runner(
                 verbose=verbose,
             )
+            multiagent_runner_is_graph = False
+        else:
+            multiagent_runner = build_multiagent_graph_workflow_runner(
+                verbose=verbose,
+            )
+            multiagent_runner_is_graph = True
 
     turn_memory_extractor = TurnMemoryExtractor()
     summarizer = None
@@ -706,14 +714,25 @@ def chat(
             "[yellow]--graph was provided without --multi-agent, so it will be ignored.[/yellow]"
         )
 
-    if multi_agent and use_graph:
-        mode_name = "graph-multi-agent"
+    if multi_agent and legacy_multi_agent:
+        mode_name = "legacy-multi-agent"
     elif multi_agent:
-        mode_name = "multi-agent"
+        mode_name = "graph-multi-agent"
     else:
         mode_name = "single-workflow"
 
     console.print(f"[dim]Mode: {mode_name}[/dim]")
+
+    if use_graph and multi_agent:
+        console.print(
+            "[dim]Note: --graph is now the default for --multi-agent, so this flag is optional.[/dim]"
+        )
+
+    if use_graph and not multi_agent:
+        console.print(
+            "[yellow]--graph was provided without --multi-agent, so it will be ignored.[/yellow]"
+        )
+
     console.print("[dim]Type 'exit', 'quit', 'q', or '退出' to stop.[/dim]")
 
     while True:
@@ -785,7 +804,7 @@ def chat(
         if (
             result is not None
             and multi_agent
-            and use_graph
+            and multiagent_runner_is_graph
             and show_graph
         ):
             print_graph_debug(result)
@@ -820,7 +839,7 @@ def chat(
                 session_id=session.session_id,
             )
 
-            report_kind = "Graph multi-agent" if use_graph else "Multi-agent"
+            report_kind = "Graph multi-agent" if multiagent_runner_is_graph else "Legacy multi-agent"
             console.print(f"[dim]{report_kind} trace report saved to: {report_path}[/dim]")
 
         assistant_metadata = {
@@ -1094,6 +1113,11 @@ def multi_agent(
         "-s",
         help="Optional conversation session id.",
     ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Use legacy if/else multi-agent runner instead of graph runner.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -1124,13 +1148,22 @@ def multi_agent(
         "--show-blackboard",
         help="Show final blackboard metadata.",
     ),
+    show_graph: bool = typer.Option(
+        False,
+        "--show-graph",
+        help="Show graph visited nodes. Only available for graph runner.",
+    ),
     save_trace_report: bool = typer.Option(
         False,
         "--save-trace-report",
         help="Save a markdown trace report for this multi-agent run.",
     ),
 ):
-    """Run the multi-agent workflow."""
+    """Run the multi-agent workflow.
+
+    By default, this command uses the graph-based multi-agent runner.
+    Use --legacy to run the old hand-written if/else runner.
+    """
 
     session = None
 
@@ -1138,7 +1171,12 @@ def multi_agent(
         store = ConversationSessionStore()
         session = store.load_or_create(session_id)
 
-    runner = build_multiagent_workflow_runner(verbose=verbose)
+    if legacy:
+        runner = build_multiagent_workflow_runner(verbose=verbose)
+        runner_name = "legacy-multi-agent"
+    else:
+        runner = build_multiagent_graph_workflow_runner(verbose=verbose)
+        runner_name = "graph-multi-agent"
 
     result = runner.answer(
         user_request=user_input,
@@ -1147,6 +1185,17 @@ def multi_agent(
 
     console.print("\n[bold green]Assistant >[/bold green]")
     console.print(result.final_answer)
+
+    if verbose:
+        console.print(f"[dim]Runner: {runner_name}[/dim]")
+
+    if show_graph:
+        if legacy:
+            console.print(
+                "[yellow]--show-graph is ignored because --legacy is enabled.[/yellow]"
+            )
+        else:
+            print_graph_debug(result)
 
     if any(
         [
@@ -1173,7 +1222,9 @@ def multi_agent(
             user_request=user_input,
             session_id=session_id,
         )
-        console.print(f"[dim]Multi-agent trace report saved to: {report_path}[/dim]")
+
+        report_kind = "Legacy multi-agent" if legacy else "Graph multi-agent"
+        console.print(f"[dim]{report_kind} trace report saved to: {report_path}[/dim]")
 
 @app.command("eval-multi-agent")
 def eval_multi_agent(
@@ -1192,10 +1243,20 @@ def eval_multi_agent(
         "--verbose",
         help="Show internal workflow logs.",
     ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Evaluate legacy if/else multi-agent runner instead of graph runner.",
+    ),
 ):
     """Evaluate multi-agent workflow with rule-based checks."""
 
-    runner = build_multiagent_workflow_runner(verbose=verbose)
+    if legacy:
+        runner = build_multiagent_workflow_runner(verbose=verbose)
+        runner_name = "legacy-multi-agent"
+    else:
+        runner = build_multiagent_graph_workflow_runner(verbose=verbose)
+        runner_name = "graph-multi-agent"
 
     output_dir = Path(settings.workspace) / "eval_runs"
 
@@ -1211,6 +1272,7 @@ def eval_multi_agent(
     )
 
     console.rule("[bold green]Multi-agent Evaluation Summary")
+    console.print(f"Runner: {runner_name}")
     console.print(f"Total: {summary.total}")
     console.print(f"Passed: {summary.passed}")
     console.print(f"Failed: {summary.failed}")
