@@ -16,6 +16,7 @@ from research_pilot.graph import (
 from research_pilot.multiagent import ResearchPilotBlackboard, SubAgentInput
 from research_pilot.multiagent.subagents import (
     CodeSubAgent,
+    GeneralSubAgent,
     PaperSubAgent,
     PlannerSubAgent,
     ReviewerSubAgent,
@@ -23,7 +24,7 @@ from research_pilot.multiagent.subagents import (
 )
 from research_pilot.workflows.code_workflows import CodeWorkflowRunner
 from research_pilot.workflows.paper_workflows import PaperWorkflowRunner
-
+from research_pilot.core.agent_loop import AgentLoop
 
 class MultiAgentGraphWorkflowRunner:
     """Graph-based multi-agent workflow runner.
@@ -46,6 +47,7 @@ class MultiAgentGraphWorkflowRunner:
         code_workflow_runner: CodeWorkflowRunner,
         paper_workflow_runner: PaperWorkflowRunner,
         llm_client: OpenAICompatibleLLMClient,
+        general_agent_loop: AgentLoop | None = None,
         console: Console | None = None,
         max_specialist_retries: int = 1,
         max_graph_steps: int = 20,
@@ -61,6 +63,10 @@ class MultiAgentGraphWorkflowRunner:
         self.planner = PlannerSubAgent(llm_client=self.llm_client)
         self.code_agent = CodeSubAgent(runner=self.code_workflow_runner)
         self.paper_agent = PaperSubAgent(runner=self.paper_workflow_runner)
+        self.general_agent = GeneralSubAgent(
+            agent_loop=general_agent_loop,
+            llm_client=self.llm_client,
+        )
         self.reviewer = ReviewerSubAgent(llm_client=self.llm_client)
         self.writer = WriterSubAgent(llm_client=self.llm_client)
 
@@ -98,10 +104,13 @@ class MultiAgentGraphWorkflowRunner:
             "blackboard",
             "planner_output",
             "initial_specialist_output",
+            "general_output",
             "review_output",
             "specialist_retry_outputs",
             "specialist_retry_review_outputs",
             "writer_output",
+            "source_agent",
+            "current_answer",
         ]:
             if key in metadata:
                 self._attach_metadata(state=state, key=key, value=metadata[key])
@@ -126,6 +135,7 @@ class MultiAgentGraphWorkflowRunner:
         graph.add_node(FunctionGraphNode("planner", self._planner_node))
         graph.add_node(FunctionGraphNode("code", self._code_node))
         graph.add_node(FunctionGraphNode("paper", self._paper_node))
+        graph.add_node(FunctionGraphNode("general", self._general_node))
         graph.add_node(FunctionGraphNode("reviewer", self._reviewer_node))
         graph.add_node(FunctionGraphNode("retry", self._retry_node))
         graph.add_node(FunctionGraphNode("writer", self._writer_node))
@@ -136,6 +146,7 @@ class MultiAgentGraphWorkflowRunner:
         graph.add_conditional_edge("planner", self._route_after_planner)
         graph.add_edge("code", "reviewer")
         graph.add_edge("paper", "reviewer")
+        graph.add_edge("general", "final")
         graph.add_conditional_edge("reviewer", self._route_after_review)
         graph.add_conditional_edge("retry", self._route_after_retry)
         graph.add_edge("writer", "final")
@@ -199,6 +210,43 @@ class MultiAgentGraphWorkflowRunner:
             state=state,
             source_agent="paper",
             subagent=self.paper_agent,
+        )
+    
+    def _general_node(self, state: GraphState) -> GraphNodeResult:
+        blackboard = self._blackboard(state)
+
+        output = self.general_agent.run(
+            SubAgentInput(
+                blackboard=blackboard,
+                instruction=state.user_request,
+                metadata={
+                    "planner_decision": state.metadata.get("planner_decision") or {},
+                },
+            )
+        )
+
+        if output.success and output.content.strip():
+            answer = output.content
+        else:
+            answer = (
+                "The general fallback agent failed to answer the request.\n\n"
+                f"Error: {output.error}"
+            )
+
+        return GraphNodeResult(
+            success=output.success,
+            updates={
+                "blackboard": blackboard,
+                "source_agent": "general",
+                "current_answer": answer,
+                "initial_specialist_output": output.model_dump(),
+                "general_output": output.model_dump(),
+            },
+            error=output.error,
+            output_preview=answer[:1000],
+            metadata={
+                "source_agent": "general",
+            },
         )
 
     def _run_specialist_node(
@@ -398,7 +446,9 @@ class MultiAgentGraphWorkflowRunner:
         if next_agent == "paper":
             return "paper"
 
-        return "final"
+        # If no specialist is selected, do not stop directly.
+        # Route to the general fallback agent so open-ended questions can still be answered.
+        return "general"
 
     def _route_after_review(
         self,

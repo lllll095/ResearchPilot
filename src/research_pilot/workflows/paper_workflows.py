@@ -208,19 +208,26 @@ class PaperWorkflowRunner:
         force_download: bool = False,
         save_report: bool = True,
         report_title: str | None = None,
+        search_query: str | None = None,
     ) -> AgentState:
         """Local-first full paper research workflow.
 
         It first searches indexed papers. If evidence seems insufficient,
         it downloads more papers, rebuilds the index, searches again, then
         writes a citation-aware answer and optionally saves a report.
+
+        This version also adds a post-answer fallback:
+        if the answer writer says the retrieved evidence is insufficient, the
+        workflow will collect more papers and retry once.
         """
+        download_query = search_query or question
 
         run_id = self._new_run_id("paper_research")
         state = AgentState(user_goal=f"Paper research workflow: {question}")
         step_id = 1
 
         search_obs: Observation | None = None
+        downloaded_or_reindexed = False
 
         if not force_download:
             search_obs, step_id = self._run_tool(
@@ -229,14 +236,18 @@ class PaperWorkflowRunner:
                 state=state,
                 tool_name="engineered_rag_search",
                 tool_input={
-                    "query": question,
+                    "query": download_query,
                 },
             )
 
         enough = (
             search_obs is not None
             and search_obs.success
-            and self._evidence_is_sufficient(search_obs, min_sources=min_sources)
+            and self._evidence_is_sufficient(
+                search_obs,
+                query=download_query,
+                min_sources=min_sources,
+            )
         )
 
         if force_download or not enough:
@@ -251,7 +262,7 @@ class PaperWorkflowRunner:
                 state=state,
                 tool_name="paper_download",
                 tool_input={
-                    "query": question,
+                    "query": download_query,
                     "max_papers": max_papers,
                 },
             )
@@ -288,13 +299,15 @@ class PaperWorkflowRunner:
                     ),
                 )
 
+            downloaded_or_reindexed = True
+
             search_obs, step_id = self._run_tool(
                 run_id=run_id,
                 step_id=step_id,
                 state=state,
                 tool_name="engineered_rag_search",
                 tool_input={
-                    "query": question,
+                    "query": download_query,
                 },
             )
 
@@ -334,6 +347,118 @@ class PaperWorkflowRunner:
             )
 
         final_answer = answer_obs.content
+
+        if (
+            not downloaded_or_reindexed
+            and self._answer_indicates_insufficient_evidence(final_answer)
+        ):
+            self.console.print(
+                "[yellow]Evidence answer indicates insufficient retrieved evidence. "
+                "Collecting more papers and retrying...[/yellow]"
+            )
+
+            download_obs, step_id = self._run_tool(
+                run_id=run_id,
+                step_id=step_id,
+                state=state,
+                tool_name="paper_download",
+                tool_input={
+                    "query": download_query,
+                    "max_papers": max_papers,
+                },
+            )
+
+            if not download_obs.success:
+                return self._finalize(
+                    run_id=run_id,
+                    step_id=step_id,
+                    state=state,
+                    final_answer=(
+                        "Paper research workflow found insufficient local evidence, "
+                        "but failed during paper_download.\n\n"
+                        f"{download_obs.content}\n\n"
+                        "Initial answer based on local evidence:\n\n"
+                        f"{final_answer}"
+                    ),
+                )
+
+            index_obs, step_id = self._run_tool(
+                run_id=run_id,
+                step_id=step_id,
+                state=state,
+                tool_name="engineered_rag_index",
+                tool_input={
+                    "sync_downloaded_papers": True,
+                },
+            )
+
+            if not index_obs.success:
+                return self._finalize(
+                    run_id=run_id,
+                    step_id=step_id,
+                    state=state,
+                    final_answer=(
+                        "Paper research workflow found insufficient local evidence, "
+                        "but failed during engineered_rag_index.\n\n"
+                        f"{index_obs.content}\n\n"
+                        "Initial answer based on local evidence:\n\n"
+                        f"{final_answer}"
+                    ),
+                )
+
+            downloaded_or_reindexed = True
+
+            search_obs, step_id = self._run_tool(
+                run_id=run_id,
+                step_id=step_id,
+                state=state,
+                tool_name="engineered_rag_search",
+                tool_input={
+                    "query": download_query,
+                },
+            )
+
+            if not search_obs.success:
+                return self._finalize(
+                    run_id=run_id,
+                    step_id=step_id,
+                    state=state,
+                    final_answer=(
+                        "Paper research workflow found insufficient local evidence, "
+                        "downloaded papers, but failed during engineered_rag_search.\n\n"
+                        f"{search_obs.content}\n\n"
+                        "Initial answer based on local evidence:\n\n"
+                        f"{final_answer}"
+                    ),
+                )
+
+            answer_obs, step_id = self._run_tool(
+                run_id=run_id,
+                step_id=step_id,
+                state=state,
+                tool_name="write_evidence_answer",
+                tool_input={
+                    "question": question,
+                    "max_evidence_items": 10,
+                    "max_chars_per_item": 4500,
+                },
+            )
+
+            if not answer_obs.success:
+                return self._finalize(
+                    run_id=run_id,
+                    step_id=step_id,
+                    state=state,
+                    final_answer=(
+                        "Paper research workflow failed during write_evidence_answer "
+                        "after collecting more papers.\n\n"
+                        f"{answer_obs.content}\n\n"
+                        "Initial answer based on local evidence:\n\n"
+                        f"{final_answer}"
+                    ),
+                )
+
+            final_answer = answer_obs.content
 
         if save_report:
             title = report_title or self._safe_title(question)
@@ -437,12 +562,19 @@ class PaperWorkflowRunner:
         safe = "_".join(part for part in safe.split("_") if part)
         return safe[:max_len] or "paper_report"
 
-    @staticmethod
+    @classmethod
     def _evidence_is_sufficient(
+        cls,
         observation: Observation,
+        query: str = "",
         min_sources: int = 3,
         min_chars: int = 800,
     ) -> bool:
+        """Check whether retrieved local evidence is sufficient.
+
+        This checks both quantity and query-anchor coverage.
+        """
+
         if not observation.success:
             return False
 
@@ -451,13 +583,224 @@ class PaperWorkflowRunner:
         num_docs = int(metadata.get("num_docs", 0) or 0)
         evidence_blocks = metadata.get("evidence_blocks", [])
 
+        has_enough_quantity = False
+
         if isinstance(evidence_blocks, list) and len(evidence_blocks) >= min_sources:
-            return True
+            has_enough_quantity = True
 
         if num_docs >= min_sources and len(observation.content or "") >= min_chars:
+            has_enough_quantity = True
+
+        if not has_enough_quantity:
+            return False
+
+        anchors = cls._extract_query_anchors(query)
+
+        if not anchors:
             return True
 
-        return False
+        evidence_text = cls._combined_evidence_text(
+            observation=observation,
+            query=query,
+        ).lower()
+
+        matched_anchors = [
+            anchor
+            for anchor in anchors
+            if anchor.lower() in evidence_text
+        ]
+
+        return len(matched_anchors) >= 1
+
+    @staticmethod
+    def _extract_query_anchors(query: str) -> list[str]:
+        """Extract strong query anchors such as method names or paper names."""
+
+        import re
+
+        if not query:
+            return []
+
+        anchors: list[str] = []
+
+        mixed_case_terms = re.findall(
+            r"\b[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b",
+            query,
+        )
+
+        if mixed_case_terms:
+            return PaperWorkflowRunner._dedupe_terms(mixed_case_terms)[:8]
+
+        quoted = re.findall(r"[\"'“”‘’]([^\"'“”‘’]{2,80})[\"'“”‘’]", query)
+        anchors.extend(term.strip() for term in quoted if term.strip())
+
+        acronyms = re.findall(r"\b[A-Z]{2,}[A-Z0-9-]*\b", query)
+        acronym_stopwords = {"AI", "LLM", "GPT", "PDF"}
+
+        for acronym in acronyms:
+            if acronym not in acronym_stopwords:
+                anchors.append(acronym)
+
+        words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9-]{5,}\b", query)
+
+        stopwords = {
+            "please",
+            "explain",
+            "answer",
+            "based",
+            "using",
+            "papers",
+            "paper",
+            "local",
+            "evidence",
+            "research",
+            "report",
+            "review",
+            "survey",
+            "architecture",
+            "method",
+            "methods",
+            "model",
+            "models",
+            "what",
+            "about",
+            "original",
+            "request",
+            "subagent",
+            "instruction",
+            "planner",
+            "rewritten",
+            "workflow",
+            "preserve",
+            "author",
+            "authors",
+            "datasets",
+            "topic",
+            "terms",
+            "indexed",
+            "insufficient",
+            "adaptive",
+            "collect",
+            "index",
+            "answering",
+        }
+
+        for word in words:
+            if word.lower() not in stopwords:
+                anchors.append(word)
+
+        return PaperWorkflowRunner._dedupe_terms(anchors)[:8]
+
+
+    @staticmethod
+    def _combined_evidence_text(
+        observation: Observation,
+        query: str = "",
+    ) -> str:
+        """Combine evidence metadata into one text.
+
+        Prefer evidence_blocks over observation.content, because observation.content
+        may echo the query itself.
+        """
+
+        parts: list[str] = []
+
+        metadata = observation.metadata or {}
+        evidence_blocks = metadata.get("evidence_blocks", [])
+
+        if isinstance(evidence_blocks, list):
+            for block in evidence_blocks:
+                if isinstance(block, dict):
+                    for key in [
+                        "title",
+                        "paper_title",
+                        "source",
+                        "text",
+                        "content",
+                        "chunk",
+                        "abstract",
+                    ]:
+                        value = block.get(key)
+                        if value:
+                            parts.append(str(value))
+                elif block:
+                    parts.append(str(block))
+
+        if parts:
+            return "\n".join(parts)
+
+        text = str(observation.content or "")
+
+        if query:
+            text = text.replace(query, "")
+
+        return text
+
+
+    @staticmethod
+    def _dedupe_terms(terms: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+
+        for term in terms:
+            normalized = term.strip()
+            key = normalized.lower()
+
+            if not normalized or key in seen:
+                continue
+
+            seen.add(key)
+            deduped.append(normalized)
+
+        return deduped
+
+
+    @staticmethod
+    def _answer_indicates_insufficient_evidence(answer: str) -> bool:
+        """Detect whether the answer writer reports insufficient evidence."""
+
+        if not answer:
+            return True
+
+        lower = answer.lower()
+
+        english_patterns = [
+            "does not contain any direct information",
+            "does not contain direct information",
+            "no direct information",
+            "no explanation or description available",
+            "no architecture components",
+            "not present in the retrieved evidence",
+            "none mention or explain",
+            "insufficient evidence",
+            "retrieved evidence does not contain",
+            "retrieved documents do not contain",
+            "based on the current indexed documents",
+            "current indexed documents",
+            "not found in the retrieved",
+            "not found in the indexed",
+        ]
+
+        chinese_patterns = [
+            "没有直接信息",
+            "不包含直接信息",
+            "没有关于",
+            "未包含",
+            "未找到",
+            "没有找到",
+            "证据不足",
+            "检索到的证据不包含",
+            "当前索引文档",
+            "当前检索资料",
+            "无法提供",
+            "不足以",
+            "没有相关证据",
+            "没有明确描述",
+        ]
+
+        return any(pattern in lower for pattern in english_patterns) or any(
+            pattern in answer for pattern in chinese_patterns
+        )
 
     @staticmethod
     def _build_collection_summary(

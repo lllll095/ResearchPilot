@@ -118,10 +118,16 @@ def build_multiagent_graph_workflow_runner(
     paper_runner = build_paper_workflow_runner(verbose=verbose)
     llm_client = OpenAICompatibleLLMClient.from_settings()
 
+    general_agent_loop = build_runtime(
+        policy_name="llm",
+        verbose=verbose,
+    )
+
     return MultiAgentGraphWorkflowRunner(
         code_workflow_runner=code_runner,
         paper_workflow_runner=paper_runner,
         llm_client=llm_client,
+        general_agent_loop=general_agent_loop,
         console=get_runtime_console(verbose),
     )
 
@@ -771,12 +777,12 @@ def chat(
                     raise RuntimeError("Multi-agent runner was not initialized.")
 
                 result = multiagent_runner.answer(
-                    user_request=contextual_input,
+                    user_request=user_message,
                     session=session,
                 )
             else:
                 result = run_ask_request(
-                    user_input=contextual_input,
+                    user_input=user_message,
                     max_papers=max_papers,
                     force_download=force_download,
                     save_report=save_report,

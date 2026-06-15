@@ -150,9 +150,13 @@ Currently available subagents:
   CodeWorkflowRunner, PaperWorkflowRunner, or other codebase details.
 
 2. paper
-- Use this for questions about papers, literature, research topics, academic
-  references, downloaded/indexed papers, evidence from papers, citation-aware
-  paper answers, paper reports, and research summaries.
+- Use this for paper, literature, academic research, evidence-based answers,
+  paper collection, literature review, survey, related work, and research reports.
+- The paper agent can answer from existing indexed papers, but it can also run
+  an adaptive local-first paper research workflow: retrieve local evidence first,
+  collect/download/index new papers if evidence is insufficient, then answer.
+- Chinese triggers include: 论文, 文献, 综述, 调研, 找论文, 搜论文, 下载论文,
+  相关工作, 课题组汇报, 生成报告.
 
 3. none
 - Use this only when no available specialized subagent can handle the request.
