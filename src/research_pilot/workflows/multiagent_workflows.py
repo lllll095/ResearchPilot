@@ -37,11 +37,13 @@ class MultiAgentWorkflowRunner:
         paper_workflow_runner: PaperWorkflowRunner,
         llm_client: OpenAICompatibleLLMClient,
         console: Console | None = None,
+        max_specialist_retries: int = 1,
     ):
         self.code_workflow_runner = code_workflow_runner
         self.paper_workflow_runner = paper_workflow_runner
         self.llm_client = llm_client
         self.console = console or Console()
+        self.max_specialist_retries = max_specialist_retries
 
         self.planner = PlannerSubAgent(llm_client=self.llm_client)
         self.code_agent = CodeSubAgent(runner=self.code_workflow_runner)
@@ -54,7 +56,15 @@ class MultiAgentWorkflowRunner:
         user_request: str,
         session: ConversationSession | None = None,
     ) -> AgentState:
-        """Run the minimal multi-agent workflow and return an AgentState."""
+        """Run the multi-agent workflow and return an AgentState.
+
+        Flow:
+            planner
+            -> specialist
+            -> reviewer
+            -> optional specialist retry
+            -> optional writer rewrite
+        """
 
         blackboard = ResearchPilotBlackboard.from_session(
             user_request=user_request,
@@ -74,20 +84,24 @@ class MultiAgentWorkflowRunner:
         source_agent = "none"
 
         if next_agent == "code":
-            final_answer = self._run_code_agent(
-                user_request=user_request,
-                blackboard=blackboard,
-                decision=decision,
-            )
             source_agent = "code"
         elif next_agent == "paper":
-            final_answer = self._run_paper_agent(
+            source_agent = "paper"
+
+        if source_agent in {"code", "paper"}:
+            specialist_output = self._run_specialist(
+                source_agent=source_agent,
                 user_request=user_request,
                 blackboard=blackboard,
                 decision=decision,
             )
-            source_agent = "paper"
+
+            final_answer = self._answer_from_specialist_output(
+                specialist_output=specialist_output,
+                source_agent=source_agent,
+            )
         else:
+            specialist_output = None
             final_answer = (
                 "The multi-agent runner could not select a specialized subagent.\n\n"
                 "Current available subagents: code, paper.\n\n"
@@ -100,9 +114,53 @@ class MultiAgentWorkflowRunner:
             source_agent=source_agent,
         )
 
-        writer_output = None
+        retry_outputs = []
+        retry_review_outputs = []
 
         review_result = review_output.updates.get("review_result", {})
+
+        if (
+            source_agent in {"code", "paper"}
+            and not review_result.get("passed", True)
+            and self.max_specialist_retries > 0
+        ):
+            retry_instruction = self._build_retry_instruction(
+                user_request=user_request,
+                review_result=review_result,
+                previous_answer=final_answer,
+            )
+
+            for retry_idx in range(self.max_specialist_retries):
+                retry_output = self._run_specialist(
+                    source_agent=source_agent,
+                    user_request=retry_instruction,
+                    blackboard=blackboard,
+                    decision=decision,
+                )
+                retry_outputs.append(retry_output)
+
+                retry_answer = self._answer_from_specialist_output(
+                    specialist_output=retry_output,
+                    source_agent=source_agent,
+                )
+
+                retry_review_output = self._run_reviewer(
+                    blackboard=blackboard,
+                    candidate_answer=retry_answer,
+                    source_agent=source_agent,
+                )
+                retry_review_outputs.append(retry_review_output)
+
+                retry_review_result = retry_review_output.updates.get("review_result", {})
+
+                final_answer = retry_answer
+                review_output = retry_review_output
+                review_result = retry_review_result
+
+                if retry_review_result.get("passed", False):
+                    break
+
+        writer_output = None
 
         if not review_result.get("passed", True):
             writer_output = self._run_writer(
@@ -130,8 +188,23 @@ class MultiAgentWorkflowRunner:
         )
         self._attach_metadata(
             state=state,
+            key="initial_specialist_output",
+            value=specialist_output.model_dump() if specialist_output is not None else None,
+        )
+        self._attach_metadata(
+            state=state,
             key="review_output",
             value=review_output.model_dump(),
+        )
+        self._attach_metadata(
+            state=state,
+            key="specialist_retry_outputs",
+            value=[output.model_dump() for output in retry_outputs],
+        )
+        self._attach_metadata(
+            state=state,
+            key="specialist_retry_review_outputs",
+            value=[output.model_dump() for output in retry_review_outputs],
         )
 
         if writer_output is not None:
@@ -142,6 +215,39 @@ class MultiAgentWorkflowRunner:
             )
 
         return state
+    
+    def _run_specialist(
+        self,
+        source_agent: str,
+        user_request: str,
+        blackboard: ResearchPilotBlackboard,
+        decision: dict,
+    ):
+        """Run the selected specialist subagent."""
+
+        if source_agent == "code":
+            return self.code_agent.run(
+                SubAgentInput(
+                    blackboard=blackboard,
+                    instruction=user_request,
+                    metadata={
+                        "planner_decision": decision,
+                    },
+                )
+            )
+
+        if source_agent == "paper":
+            return self.paper_agent.run(
+                SubAgentInput(
+                    blackboard=blackboard,
+                    instruction=user_request,
+                    metadata={
+                        "planner_decision": decision,
+                    },
+                )
+            )
+
+        raise ValueError(f"Unknown specialist agent: {source_agent}")
 
     def _run_code_agent(
         self,
@@ -244,3 +350,62 @@ class MultiAgentWorkflowRunner:
 
         if hasattr(state, "metadata") and isinstance(state.metadata, dict):
             state.metadata[key] = value
+
+    @staticmethod
+    def _answer_from_specialist_output(
+        specialist_output,
+        source_agent: str,
+    ) -> str:
+        """Convert specialist output into a candidate final answer."""
+
+        if not specialist_output.success:
+            return (
+                f"{source_agent.capitalize()}SubAgent failed.\n\n"
+                f"{specialist_output.error}"
+            )
+
+        return specialist_output.content
+    
+    @staticmethod
+    def _build_retry_instruction(
+        user_request: str,
+        review_result: dict,
+        previous_answer: str,
+    ) -> str:
+        """Build a retry instruction for the same specialist.
+
+        The retry asks the specialist to improve evidence collection or answer
+        grounding according to the reviewer feedback.
+        """
+
+        issues = review_result.get("issues") or []
+        missing_evidence = review_result.get("missing_evidence") or []
+        unsupported_claims = review_result.get("unsupported_claims") or []
+        suggestions = review_result.get("suggestions") or []
+
+        return f"""Original user request:
+    {user_request}
+
+    The previous answer did not pass review.
+
+    Reviewer issues:
+    {issues}
+
+    Missing evidence:
+    {missing_evidence}
+
+    Unsupported claims:
+    {unsupported_claims}
+
+    Reviewer suggestions:
+    {suggestions}
+
+    Previous answer:
+    {previous_answer}
+
+    Retry instruction:
+    Run the specialist workflow again. Try to collect stronger evidence if possible.
+    For code tasks, preserve exact class/function/file names and search for the relevant implementation.
+    For paper tasks, preserve exact research topic terms and use retrieved paper evidence.
+    If the evidence is still insufficient, clearly state the limitation in the final answer.
+    """
