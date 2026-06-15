@@ -32,6 +32,7 @@ class AgentLoop:
         trace_store: TraceStore,
         hook_manager: HookManager | None = None,
         max_steps: int = 10,
+        console: Console | None = None,
     ):
         self.policy = policy
         self.tool_runtime = tool_runtime
@@ -39,7 +40,7 @@ class AgentLoop:
         self.trace_store = trace_store
         self.hook_manager = hook_manager or HookManager()
         self.max_steps = max_steps
-        self.console = Console()
+        self.console = console or Console()
 
     def run(self, user_goal: str) -> AgentState:
         state = AgentState(user_goal=user_goal)

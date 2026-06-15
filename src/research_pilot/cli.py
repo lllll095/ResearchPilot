@@ -1,8 +1,12 @@
 from pathlib import Path
+from io import StringIO
+import json
 
 import typer
+from typing import Any
 from rich.console import Console
 
+from research_pilot.agents.llm_agent import LLMAgentPolicy
 from research_pilot.agents.mock_agent import MockAgentPolicy
 from research_pilot.config import settings
 from research_pilot.core.agent_loop import AgentLoop, AgentPolicy
@@ -32,11 +36,42 @@ from research_pilot.workflows.paper_workflows import PaperWorkflowRunner
 from research_pilot.workflows.intent_router import IntentRouter, IntentType
 from research_pilot.evaluation.paper_eval import PaperWorkflowEvaluator
 from research_pilot.evaluation.llm_judge import PaperAnswerLLMJudge
+from research_pilot.tools.codebase_tools import (
+    CodeMapTool,
+    CodeReadTool,
+    CodeSearchTool,
+)
+from research_pilot.tools.code_answer_tool import WriteCodeAnswerTool
+from research_pilot.workflows.code_workflows import CodeWorkflowRunner
+from research_pilot.evaluation.code_eval import CodeWorkflowEvaluator
+from research_pilot.conversation.conversation_context import ConversationContextBuilder
+from research_pilot.conversation.session_store import ConversationSessionStore
+from research_pilot.conversation.summarizer import ConversationSummarizer
+from research_pilot.core.llm_client import OpenAICompatibleLLMClient
+from research_pilot.conversation.turn_memory import TurnMemoryExtractor
+from research_pilot.workflows.multiagent_workflows import MultiAgentWorkflowRunner
+from research_pilot.evaluation.multiagent_eval import MultiAgentWorkflowEvaluator
+from research_pilot.multiagent.trace_report import MultiAgentTraceReportWriter
+from research_pilot.workflows.multiagent_graph_workflows import (
+    MultiAgentGraphWorkflowRunner,
+)
 
 app = typer.Typer(help="ResearchPilot command line interface.")
 console = Console()
 
-def build_paper_workflow_runner() -> PaperWorkflowRunner:
+def get_runtime_console(verbose: bool = True) -> Console:
+    """Return normal console for verbose mode, otherwise a silent console."""
+
+    if verbose:
+        return console
+
+    return Console(
+        file=StringIO(),
+        force_terminal=False,
+        width=120,
+    )
+
+def build_paper_workflow_runner(verbose: bool = True) -> PaperWorkflowRunner:
     """Build deterministic paper workflow runner."""
 
     loop = build_runtime(policy_name="llm")
@@ -44,28 +79,178 @@ def build_paper_workflow_runner() -> PaperWorkflowRunner:
     return PaperWorkflowRunner(
         tool_runtime=loop.tool_runtime,
         trace_store=loop.trace_store,
-        console=console,
+        console=get_runtime_console(verbose),
     )
 
-def build_policy(policy_name: str) -> AgentPolicy:
-    """Build an Agent policy by name."""
+def build_code_workflow_runner(verbose: bool = True) -> CodeWorkflowRunner:
+    """Build deterministic code workflow runner."""
 
-    normalized = policy_name.lower().strip()
+    loop = build_runtime(policy_name="llm")
 
-    if normalized == "mock":
+    return CodeWorkflowRunner(
+        tool_runtime=loop.tool_runtime,
+        trace_store=loop.trace_store,
+        console=get_runtime_console(verbose),
+    )
+
+def build_multiagent_workflow_runner(
+    verbose: bool = True,
+) -> MultiAgentWorkflowRunner:
+    """Build minimal multi-agent workflow runner."""
+
+    code_runner = build_code_workflow_runner(verbose=verbose)
+    paper_runner = build_paper_workflow_runner(verbose=verbose)
+    llm_client = OpenAICompatibleLLMClient.from_settings()
+
+    return MultiAgentWorkflowRunner(
+        code_workflow_runner=code_runner,
+        paper_workflow_runner=paper_runner,
+        llm_client=llm_client,
+        console=get_runtime_console(verbose),
+    )
+
+def build_multiagent_graph_workflow_runner(
+    verbose: bool = True,
+) -> MultiAgentGraphWorkflowRunner:
+    """Build graph-based multi-agent workflow runner."""
+
+    code_runner = build_code_workflow_runner(verbose=verbose)
+    paper_runner = build_paper_workflow_runner(verbose=verbose)
+    llm_client = OpenAICompatibleLLMClient.from_settings()
+
+    general_agent_loop = build_runtime(
+        policy_name="llm",
+        verbose=verbose,
+    )
+
+    return MultiAgentGraphWorkflowRunner(
+        code_workflow_runner=code_runner,
+        paper_workflow_runner=paper_runner,
+        llm_client=llm_client,
+        general_agent_loop=general_agent_loop,
+        console=get_runtime_console(verbose),
+    )
+
+def print_multiagent_debug(
+    result,
+    show_plan: bool = False,
+    show_review: bool = False,
+    show_retry: bool = False,
+    show_writer: bool = False,
+    show_blackboard: bool = False,
+) -> None:
+    """Print selected multi-agent debug metadata."""
+
+    metadata = getattr(result, "metadata", None)
+
+    if not isinstance(metadata, dict) or not metadata:
+        console.print("[dim]No multi-agent metadata found.[/dim]")
+        return
+
+    if show_plan:
+        _print_debug_json(
+            title="Planner Output",
+            payload=metadata.get("planner_output"),
+        )
+
+    if show_review:
+        _print_debug_json(
+            title="Reviewer Output",
+            payload=metadata.get("review_output"),
+        )
+
+    if show_retry:
+        _print_debug_json(
+            title="Specialist Retry Outputs",
+            payload=metadata.get("specialist_retry_outputs"),
+        )
+        _print_debug_json(
+            title="Specialist Retry Review Outputs",
+            payload=metadata.get("specialist_retry_review_outputs"),
+        )
+
+    if show_writer:
+        _print_debug_json(
+            title="Writer Output",
+            payload=metadata.get("writer_output"),
+        )
+
+    if show_blackboard:
+        _print_debug_json(
+            title="Blackboard",
+            payload=metadata.get("blackboard"),
+        )
+
+def print_graph_debug(result) -> None:
+    """Print graph workflow debug information."""
+
+    metadata = getattr(result, "metadata", None)
+
+    if not isinstance(metadata, dict):
+        console.print("[dim]No metadata found.[/dim]")
+        return
+
+    visited_nodes = metadata.get("visited_nodes")
+
+    if not visited_nodes:
+        graph_state = metadata.get("graph_state") or {}
+        if isinstance(graph_state, dict):
+            visited_nodes = graph_state.get("visited_nodes")
+
+    console.rule("[bold blue]Graph Visited Nodes")
+    console.print(visited_nodes or "[dim](empty)[/dim]")
+
+def _print_debug_json(
+    title: str,
+    payload: Any,
+) -> None:
+    """Pretty-print a debug payload as JSON."""
+
+    console.rule(f"[bold blue]{title}")
+
+    if payload is None:
+        console.print("[dim](empty)[/dim]")
+        return
+
+    console.print(
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
+    )
+
+def build_policy(policy_name: str, tool_runtime=None):
+    if policy_name == "mock":
         return MockAgentPolicy()
 
-    if normalized == "llm":
-        from research_pilot.agents.llm_agent import LLMAgentPolicy
+    if policy_name == "llm":
         from research_pilot.core.llm_client import OpenAICompatibleLLMClient
 
         llm_client = OpenAICompatibleLLMClient.from_settings()
-        return LLMAgentPolicy(llm_client=llm_client)
+
+        tool_specs = []
+        if tool_runtime is not None:
+            if hasattr(tool_runtime, "list_tool_specs"):
+                tool_specs = tool_runtime.list_tool_specs()
+            elif hasattr(tool_runtime, "tool_specs"):
+                maybe_specs = tool_runtime.tool_specs
+                tool_specs = maybe_specs() if callable(maybe_specs) else maybe_specs
+            elif hasattr(tool_runtime, "tools"):
+                tool_specs = [
+                    tool.spec()
+                    for tool in tool_runtime.tools.values()
+                ]
+
+        return LLMAgentPolicy(
+            llm_client=llm_client,
+            tool_specs=tool_specs,
+        )
 
     raise ValueError(f"Unknown policy: {policy_name}. Use 'mock' or 'llm'.")
 
-
-def build_runtime(policy_name: str = "mock") -> AgentLoop:
+def build_runtime(policy_name: str = "mock", verbose: bool = True) -> AgentLoop:
     workspace = Path(settings.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
 
@@ -76,6 +261,10 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
     tool_runtime.register(ReadFileTool(permission_checker))
     tool_runtime.register(SaveNoteTool(workspace / "notes"))
     tool_runtime.register(ShellTool(permission_checker))
+    tool_runtime.register(CodeMapTool())
+    tool_runtime.register(CodeSearchTool())
+    tool_runtime.register(CodeReadTool())
+    
     tool_runtime.register(TodoWriteTool())
     tool_runtime.register(TodoReadTool())
     if settings.web_search_backend.lower() == "tavily":
@@ -86,6 +275,8 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
     tool_llm_client = None
     if policy_name.lower().strip() == "llm":
         tool_llm_client = OpenAICompatibleLLMClient.from_settings()
+
+    tool_runtime.register(WriteCodeAnswerTool(llm_client=tool_llm_client))
 
     tool_runtime.register(SummarizeEvidenceTool(llm_client=tool_llm_client))
     tool_runtime.register(WriteEvidenceAnswerTool(llm_client=tool_llm_client))
@@ -99,7 +290,7 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
     context_manager = ContextManager()
     trace_store = TraceStore(workspace / "traces")
     hook_manager = HookManager()
-    policy = build_policy(policy_name)
+    policy = build_policy(policy_name, tool_runtime=tool_runtime)
 
     return AgentLoop(
         policy=policy,
@@ -108,8 +299,60 @@ def build_runtime(policy_name: str = "mock") -> AgentLoop:
         trace_store=trace_store,
         hook_manager=hook_manager,
         max_steps=12,
+        console=get_runtime_console(verbose),
     )
 
+def run_ask_request(
+    user_input: str,
+    max_papers: int = 3,
+    min_sources: int = 3,
+    force_download: bool = False,
+    save_report: bool = False,
+    code_path: str = "src/research_pilot",
+    verbose: bool = True,
+):
+    """Run one routed ask request and return the final AgentState."""
+
+    router = IntentRouter()
+    routed = router.route(user_input)
+
+    if verbose:
+        console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
+        console.print(f"[cyan]Reason:[/cyan] {routed.reason}")
+
+    if routed.intent_type == IntentType.CODE_ANSWER:
+        code_runner = build_code_workflow_runner(verbose=verbose)
+
+        return code_runner.code_answer(
+            question=user_input,
+            path=code_path,
+        )
+
+    runner = build_paper_workflow_runner(verbose=verbose)
+
+    if routed.intent_type == IntentType.PAPER_COLLECT:
+        return runner.paper_collect(
+            topic=user_input,
+            max_papers=routed.max_papers or max_papers,
+            rebuild_index=True,
+        )
+
+    if routed.intent_type == IntentType.PAPER_RESEARCH:
+        return runner.paper_research(
+            question=user_input,
+            max_papers=routed.max_papers or max_papers,
+            force_download=force_download or routed.force_download,
+            save_report=save_report or routed.save_report,
+        )
+
+    if routed.intent_type == IntentType.PAPER_ANSWER:
+        return runner.paper_answer(
+            question=user_input,
+            save_report=save_report or routed.save_report,
+        )
+
+    loop = build_runtime(policy_name="llm", verbose=verbose)
+    return loop.run(user_input)
 
 @app.command()
 def run(
@@ -287,60 +530,359 @@ def paper_research(
 @app.command("ask")
 def ask(
     user_input: str,
+    max_papers: int = typer.Option(
+        3,
+        "--max-papers",
+        help="Maximum papers to download when needed.",
+    ),
+    min_sources: int = typer.Option(
+        3,
+        "--min-sources",
+        help="Minimum sources required before skipping download.",
+    ),
     force_download: bool = typer.Option(
         False,
         "--force-download",
-        help="Force downloading new papers before answering.",
+        help="Force downloading new papers.",
     ),
     save_report: bool = typer.Option(
         False,
         "--save-report",
-        help="Save the final answer as a report.",
+        help="Save final answer as a report.",
+    ),
+    code_path: str = typer.Option(
+        "src/research_pilot",
+        "--code-path",
+        help="Code path to inspect when routed to code-answer.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Only print the final answer.",
     ),
 ):
-    """Ask ResearchPilot a natural language question.
+    """Ask a natural-language question and route it to the right workflow."""
 
-    This command routes the request to a stable workflow when possible.
-    """
+    result = run_ask_request(
+        user_input=user_input,
+        max_papers=max_papers,
+        min_sources=min_sources,
+        force_download=force_download,
+        save_report=save_report,
+        code_path=code_path,
+        verbose=not quiet,
+    )
 
-    router = IntentRouter()
-    routed = router.route(user_input)
-
-    console.print(f"[cyan]Routed intent:[/cyan] {routed.intent_type}")
-    console.print(f"[dim]Reason: {routed.reason}[/dim]")
-
-    runner = build_paper_workflow_runner()
-
-    if routed.intent_type == IntentType.PAPER_ANSWER:
-        result = runner.paper_answer(
-            question=user_input,
-            save_report=save_report,
-        )
-
-    elif routed.intent_type == IntentType.PAPER_COLLECT:
-        result = runner.paper_collect(
-            topic=user_input,
-            max_papers=routed.max_papers,
-            rebuild_index=True,
-        )
-
-    elif routed.intent_type == IntentType.PAPER_RESEARCH:
-        result = runner.paper_research(
-            question=user_input,
-            max_papers=routed.max_papers,
-            force_download=force_download or routed.force_download,
-            save_report=save_report or routed.save_report,
-        )
-
-    else:
-        console.print(
-            "[yellow]Falling back to general Agent run. "
-            "For now, use `research-pilot run --policy llm ...` for open-ended tasks.[/yellow]"
-        )
-        return
-
-    console.rule("[bold green]ResearchPilot Answer")
+    console.rule("[bold green]Answer")
     console.print(result.final_answer)
+
+@app.command("chat")
+def chat(
+    session_id: str = typer.Option(
+        "default",
+        "--session",
+        "-s",
+        help="Conversation session id.",
+    ),
+    max_history: int = typer.Option(
+        8,
+        "--max-history",
+        help="Maximum recent messages to inject into the current request.",
+    ),
+    max_papers: int = typer.Option(
+        3,
+        "--max-papers",
+        help="Maximum papers to download when needed.",
+    ),
+    force_download: bool = typer.Option(
+        False,
+        "--force-download",
+        help="Force downloading new papers.",
+    ),
+    save_report: bool = typer.Option(
+        False,
+        "--save-report",
+        help="Save final answer as a report.",
+    ),
+    code_path: str = typer.Option(
+        "src/research_pilot",
+        "--code-path",
+        help="Code path to inspect when routed to code-answer.",
+    ),
+    summarize: bool = typer.Option(
+        True,
+        "--summarize/--no-summarize",
+        help="Whether to compress older chat history into a session summary.",
+    ),
+    summary_keep_recent: int = typer.Option(
+        8,
+        "--summary-keep-recent",
+        help="Number of recent messages to keep outside the compressed summary.",
+    ),
+    summary_min_new_messages: int = typer.Option(
+        4,
+        "--summary-min-new-messages",
+        help="Minimum new old messages required before updating the summary.",
+    ),
+    multi_agent: bool = typer.Option(
+        False,
+        "--multi-agent",
+        help="Use the multi-agent planner/subagent workflow.",
+    ),
+    use_graph: bool = typer.Option(
+        False,
+        "--graph",
+        help="Deprecated compatibility flag. Graph runner is now the default for --multi-agent.",
+    ),
+    legacy_multi_agent: bool = typer.Option(
+        False,
+        "--legacy-multi-agent",
+        help="Use legacy if/else multi-agent runner instead of graph runner.",
+    ),
+    show_graph: bool = typer.Option(
+        False,
+        "--show-graph",
+        help="Show graph visited nodes in graph multi-agent mode.",
+    ),
+    show_plan: bool = typer.Option(
+        False,
+        "--show-plan",
+        help="Show planner output in multi-agent mode.",
+    ),
+    show_review: bool = typer.Option(
+        False,
+        "--show-review",
+        help="Show reviewer output in multi-agent mode.",
+    ),
+    show_retry: bool = typer.Option(
+        False,
+        "--show-retry",
+        help="Show specialist retry outputs in multi-agent mode.",
+    ),
+    show_writer: bool = typer.Option(
+        False,
+        "--show-writer",
+        help="Show writer output in multi-agent mode.",
+    ),
+    show_blackboard: bool = typer.Option(
+        False,
+        "--show-blackboard",
+        help="Show blackboard metadata in multi-agent mode.",
+    ),
+    save_trace_report: bool = typer.Option(
+        False,
+        "--save-trace-report",
+        help="Save a markdown trace report for each multi-agent chat turn.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Show internal routing and workflow steps.",
+    ),
+):
+    """Start an interactive multi-turn ResearchPilot chat session."""
+
+    store = ConversationSessionStore()
+    session = store.load_or_create(session_id)
+    context_builder = ConversationContextBuilder(
+        max_messages=max_history,
+        max_turn_memories=4,
+    )
+
+    multiagent_runner = None
+    multiagent_runner_is_graph = False
+
+    if multi_agent:
+        if legacy_multi_agent:
+            multiagent_runner = build_multiagent_workflow_runner(
+                verbose=verbose,
+            )
+            multiagent_runner_is_graph = False
+        else:
+            multiagent_runner = build_multiagent_graph_workflow_runner(
+                verbose=verbose,
+            )
+            multiagent_runner_is_graph = True
+
+    turn_memory_extractor = TurnMemoryExtractor()
+    summarizer = None
+
+    if summarize:
+        summarizer = ConversationSummarizer(
+            llm_client=OpenAICompatibleLLMClient.from_settings()
+        )
+
+    console.print("[bold green]ResearchPilot chat started.[/bold green]")
+    console.print(f"[dim]Session: {session.session_id}[/dim]")
+
+    if use_graph and not multi_agent:
+        console.print(
+            "[yellow]--graph was provided without --multi-agent, so it will be ignored.[/yellow]"
+        )
+
+    if multi_agent and legacy_multi_agent:
+        mode_name = "legacy-multi-agent"
+    elif multi_agent:
+        mode_name = "graph-multi-agent"
+    else:
+        mode_name = "single-workflow"
+
+    console.print(f"[dim]Mode: {mode_name}[/dim]")
+
+    if use_graph and multi_agent:
+        console.print(
+            "[dim]Note: --graph is now the default for --multi-agent, so this flag is optional.[/dim]"
+        )
+
+    if use_graph and not multi_agent:
+        console.print(
+            "[yellow]--graph was provided without --multi-agent, so it will be ignored.[/yellow]"
+        )
+
+    console.print("[dim]Type 'exit', 'quit', 'q', or '退出' to stop.[/dim]")
+
+    while True:
+        try:
+            user_message = console.input("\n[bold cyan]You > [/bold cyan]").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[yellow]Chat stopped.[/yellow]")
+            break
+
+        if not user_message:
+            continue
+
+        if user_message.lower() in {"exit", "quit", "q", "bye"} or user_message in {
+            "退出",
+            "结束",
+        }:
+            console.print("[yellow]Chat stopped.[/yellow]")
+            break
+
+        contextual_input = context_builder.build_user_input(
+            session=session,
+            current_user_input=user_message,
+        )
+
+        session.add_message(
+            role="user",
+            content=user_message,
+        )
+        store.save(session)
+
+        turn_memory = None
+
+        try:
+            if multi_agent:
+                if multiagent_runner is None:
+                    raise RuntimeError("Multi-agent runner was not initialized.")
+
+                result = multiagent_runner.answer(
+                    user_request=user_message,
+                    session=session,
+                )
+            else:
+                result = run_ask_request(
+                    user_input=user_message,
+                    max_papers=max_papers,
+                    force_download=force_download,
+                    save_report=save_report,
+                    code_path=code_path,
+                    verbose=verbose,
+                )
+
+            answer = result.final_answer or ""
+
+            turn_memory = turn_memory_extractor.extract(
+                user_input=user_message,
+                state=result,
+            )
+
+        except Exception as exc:
+            answer = (
+                "The chat turn failed.\n\n"
+                f"Error type: {type(exc).__name__}\n"
+                f"Error message: {exc}"
+            )
+
+        console.print("\n[bold green]Assistant >[/bold green]")
+        console.print(answer)
+
+        if (
+            result is not None
+            and multi_agent
+            and multiagent_runner_is_graph
+            and show_graph
+        ):
+            print_graph_debug(result)
+
+        if (
+            result is not None
+            and multi_agent
+            and any(
+                [
+                    show_plan,
+                    show_review,
+                    show_retry,
+                    show_writer,
+                    show_blackboard,
+                ]
+            )
+        ):
+            print_multiagent_debug(
+                result=result,
+                show_plan=show_plan,
+                show_review=show_review,
+                show_retry=show_retry,
+                show_writer=show_writer,
+                show_blackboard=show_blackboard,
+            )
+
+        if result is not None and multi_agent and save_trace_report:
+            report_writer = MultiAgentTraceReportWriter()
+            report_path = report_writer.save(
+                state=result,
+                user_request=user_message,
+                session_id=session.session_id,
+            )
+
+            report_kind = "Graph multi-agent" if multiagent_runner_is_graph else "Legacy multi-agent"
+            console.print(f"[dim]{report_kind} trace report saved to: {report_path}[/dim]")
+
+        assistant_metadata = {
+            "mode": "chat",
+        }
+
+        if turn_memory is not None:
+            assistant_metadata["turn_memory"] = turn_memory.model_dump()
+
+        session.add_message(
+            role="assistant",
+            content=answer,
+            metadata=assistant_metadata,
+        )
+
+        summary_updated = False
+
+        if summarizer is not None:
+            try:
+                summary_updated = summarizer.maybe_summarize(
+                    session=session,
+                    keep_recent=summary_keep_recent,
+                    min_new_messages=summary_min_new_messages,
+                )
+            except Exception as exc:
+                console.print(
+                    "[yellow]Session summarization failed, but chat history was preserved.[/yellow]"
+                )
+                console.print(f"[dim]{type(exc).__name__}: {exc}[/dim]")
+
+        path = store.save(session)
+
+        if verbose:
+            console.print(f"[dim]Session saved to: {path}[/dim]")
+
+            if summary_updated:
+                console.print("[dim]Session summary updated.[/dim]")
 
 @app.command("eval-paper")
 def eval_paper(
@@ -395,6 +937,455 @@ def eval_paper(
     console.print(f"Pass rate: {summary.pass_rate:.1%}")
     console.print(f"Results: {summary.results_path}")
     console.print(f"Summary: {summary.summary_path}")
-    
+
+@app.command("code-answer")
+def code_answer(
+    question: str,
+    path: str = typer.Option(
+        "src/research_pilot",
+        "--path",
+        help="Project path to inspect.",
+    ),
+    max_results: int = typer.Option(
+        20,
+        "--max-results",
+        help="Maximum code search matches.",
+    ),
+    max_files: int = typer.Option(
+        3,
+        "--max-files",
+        help="Maximum matched files to read.",
+    ),
+):
+    """Answer a question about the codebase using deterministic code workflow."""
+
+    runner = build_code_workflow_runner()
+
+    result = runner.code_answer(
+        question=question,
+        path=path,
+        max_results=max_results,
+        max_files_to_read=max_files,
+    )
+
+    console.rule("[bold green]Code Answer")
+    console.print(result.final_answer)
+
+@app.command("eval-code")
+def eval_code(
+    cases_path: Path = typer.Option(
+        Path("eval/code_eval_cases.jsonl"),
+        "--cases",
+        help="Path to JSONL code evaluation cases.",
+    ),
+    max_cases: int | None = typer.Option(
+        None,
+        "--max-cases",
+        help="Optional maximum number of cases to run.",
+    ),
+):
+    """Evaluate code-answer workflow with rule-based checks."""
+
+    runner = build_code_workflow_runner()
+
+    output_dir = Path(settings.workspace) / "eval_runs"
+
+    evaluator = CodeWorkflowEvaluator(
+        runner=runner,
+        output_dir=output_dir,
+    )
+
+    cases = evaluator.load_cases(cases_path)
+    summary = evaluator.run_cases(
+        cases=cases,
+        max_cases=max_cases,
+    )
+
+    console.rule("[bold green]Code Evaluation Summary")
+    console.print(f"Total: {summary.total}")
+    console.print(f"Passed: {summary.passed}")
+    console.print(f"Failed: {summary.failed}")
+    console.print(f"Pass rate: {summary.pass_rate:.1%}")
+    console.print(f"Results: {summary.results_path}")
+    console.print(f"Summary: {summary.summary_path}")
+
+
+@app.command("session-show")
+def session_show(
+    session_id: str = typer.Option(
+        "default",
+        "--session",
+        "-s",
+        help="Conversation session id.",
+    ),
+    max_messages: int = typer.Option(
+        10,
+        "--max-messages",
+        help="Maximum recent raw messages to show.",
+    ),
+    show_memory: bool = typer.Option(
+        True,
+        "--show-memory/--no-show-memory",
+        help="Show compact structured turn memory.",
+    ),
+):
+    """Show a saved conversation session."""
+
+    store = ConversationSessionStore()
+    session = store.load_or_create(session_id)
+
+    console.rule(f"[bold green]Session: {session.session_id}")
+
+    console.print(f"[cyan]Created:[/cyan] {session.created_at}")
+    console.print(f"[cyan]Updated:[/cyan] {session.updated_at}")
+    console.print(f"[cyan]Messages:[/cyan] {len(session.messages)}")
+    console.print(
+        f"[cyan]Summarized message count:[/cyan] "
+        f"{session.metadata.get('summarized_message_count', 0)}"
+    )
+
+    console.rule("[bold blue]Summary")
+    console.print(session.summary or "[dim](empty)[/dim]")
+
+    console.rule("[bold blue]Recent Messages")
+
+    for message in session.recent_messages(max_messages):
+        console.print(f"[bold]{message.role}[/bold] [{message.created_at}]")
+        console.print(message.content[:1500])
+        if len(message.content) > 1500:
+            console.print("[dim]... truncated ...[/dim]")
+        console.print()
+
+    # 这一段放在 Recent Messages 的 for 循环之后。
+    # 注意：if show_memory 要和上面的 for message 对齐，不要缩进到 for 里面。
+    if show_memory:
+        console.rule("[bold blue]Recent Turn Memory")
+
+        count = 0
+
+        for message in reversed(session.messages):
+            if message.role != "assistant":
+                continue
+
+            memory = message.metadata.get("turn_memory")
+            if not isinstance(memory, dict):
+                continue
+
+            count += 1
+            console.print(f"[bold]Turn memory {count}[/bold]")
+
+            user_input = memory.get("user_input")
+            if user_input:
+                console.print(f"[cyan]User input:[/cyan] {user_input}")
+
+            code_files = memory.get("code_files") or []
+            if code_files:
+                console.print("[cyan]Code files:[/cyan]")
+                for file in code_files[:10]:
+                    console.print(f"- {file}")
+
+            code_search_queries = memory.get("code_search_queries") or []
+            if code_search_queries:
+                console.print("[cyan]Code search queries:[/cyan]")
+                for query in code_search_queries[:10]:
+                    console.print(f"- {query}")
+
+            evidence_sources = memory.get("evidence_sources") or []
+            if evidence_sources:
+                console.print("[cyan]Evidence sources:[/cyan]")
+                for source in evidence_sources[:10]:
+                    console.print(f"- {source}")
+
+            report_paths = memory.get("report_paths") or []
+            if report_paths:
+                console.print("[cyan]Report paths:[/cyan]")
+                for path in report_paths[:10]:
+                    console.print(f"- {path}")
+
+            console.print()
+
+            if count >= 5:
+                break
+
+        if count == 0:
+            console.print("[dim](no structured turn memory found)[/dim]")
+
+@app.command("multi-agent")
+def multi_agent(
+    user_input: str,
+    session_id: str | None = typer.Option(
+        None,
+        "--session",
+        "-s",
+        help="Optional conversation session id.",
+    ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Use legacy if/else multi-agent runner instead of graph runner.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Show internal workflow logs.",
+    ),
+    show_plan: bool = typer.Option(
+        False,
+        "--show-plan",
+        help="Show planner output.",
+    ),
+    show_review: bool = typer.Option(
+        False,
+        "--show-review",
+        help="Show reviewer output.",
+    ),
+    show_retry: bool = typer.Option(
+        False,
+        "--show-retry",
+        help="Show specialist retry outputs.",
+    ),
+    show_writer: bool = typer.Option(
+        False,
+        "--show-writer",
+        help="Show writer output when rewrite is triggered.",
+    ),
+    show_blackboard: bool = typer.Option(
+        False,
+        "--show-blackboard",
+        help="Show final blackboard metadata.",
+    ),
+    show_graph: bool = typer.Option(
+        False,
+        "--show-graph",
+        help="Show graph visited nodes. Only available for graph runner.",
+    ),
+    save_trace_report: bool = typer.Option(
+        False,
+        "--save-trace-report",
+        help="Save a markdown trace report for this multi-agent run.",
+    ),
+):
+    """Run the multi-agent workflow.
+
+    By default, this command uses the graph-based multi-agent runner.
+    Use --legacy to run the old hand-written if/else runner.
+    """
+
+    session = None
+
+    if session_id:
+        store = ConversationSessionStore()
+        session = store.load_or_create(session_id)
+
+    if legacy:
+        runner = build_multiagent_workflow_runner(verbose=verbose)
+        runner_name = "legacy-multi-agent"
+    else:
+        runner = build_multiagent_graph_workflow_runner(verbose=verbose)
+        runner_name = "graph-multi-agent"
+
+    result = runner.answer(
+        user_request=user_input,
+        session=session,
+    )
+
+    console.print("\n[bold green]Assistant >[/bold green]")
+    console.print(result.final_answer)
+
+    if verbose:
+        console.print(f"[dim]Runner: {runner_name}[/dim]")
+
+    if show_graph:
+        if legacy:
+            console.print(
+                "[yellow]--show-graph is ignored because --legacy is enabled.[/yellow]"
+            )
+        else:
+            print_graph_debug(result)
+
+    if any(
+        [
+            show_plan,
+            show_review,
+            show_retry,
+            show_writer,
+            show_blackboard,
+        ]
+    ):
+        print_multiagent_debug(
+            result=result,
+            show_plan=show_plan,
+            show_review=show_review,
+            show_retry=show_retry,
+            show_writer=show_writer,
+            show_blackboard=show_blackboard,
+        )
+
+    if save_trace_report:
+        report_writer = MultiAgentTraceReportWriter()
+        report_path = report_writer.save(
+            state=result,
+            user_request=user_input,
+            session_id=session_id,
+        )
+
+        report_kind = "Legacy multi-agent" if legacy else "Graph multi-agent"
+        console.print(f"[dim]{report_kind} trace report saved to: {report_path}[/dim]")
+
+@app.command("eval-multi-agent")
+def eval_multi_agent(
+    cases_path: Path = typer.Option(
+        Path("eval/multiagent_eval_cases.jsonl"),
+        "--cases",
+        help="Path to JSONL multi-agent evaluation cases.",
+    ),
+    max_cases: int | None = typer.Option(
+        None,
+        "--max-cases",
+        help="Optional maximum number of cases to run.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Show internal workflow logs.",
+    ),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="Evaluate legacy if/else multi-agent runner instead of graph runner.",
+    ),
+):
+    """Evaluate multi-agent workflow with rule-based checks."""
+
+    if legacy:
+        runner = build_multiagent_workflow_runner(verbose=verbose)
+        runner_name = "legacy-multi-agent"
+    else:
+        runner = build_multiagent_graph_workflow_runner(verbose=verbose)
+        runner_name = "graph-multi-agent"
+
+    output_dir = Path(settings.workspace) / "eval_runs"
+
+    evaluator = MultiAgentWorkflowEvaluator(
+        runner=runner,
+        output_dir=output_dir,
+    )
+
+    cases = evaluator.load_cases(cases_path)
+    summary = evaluator.run_cases(
+        cases=cases,
+        max_cases=max_cases,
+    )
+
+    console.rule("[bold green]Multi-agent Evaluation Summary")
+    console.print(f"Runner: {runner_name}")
+    console.print(f"Total: {summary.total}")
+    console.print(f"Passed: {summary.passed}")
+    console.print(f"Failed: {summary.failed}")
+    console.print(f"Pass rate: {summary.pass_rate:.1%}")
+    console.print(f"Results: {summary.results_path}")
+    console.print(f"Summary: {summary.summary_path}")
+
+@app.command("graph-multi-agent")
+def graph_multi_agent(
+    user_input: str,
+    session_id: str | None = typer.Option(
+        None,
+        "--session",
+        "-s",
+        help="Optional conversation session id.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Show internal workflow logs.",
+    ),
+    show_plan: bool = typer.Option(
+        False,
+        "--show-plan",
+        help="Show planner output.",
+    ),
+    show_review: bool = typer.Option(
+        False,
+        "--show-review",
+        help="Show reviewer output.",
+    ),
+    show_retry: bool = typer.Option(
+        False,
+        "--show-retry",
+        help="Show specialist retry outputs.",
+    ),
+    show_writer: bool = typer.Option(
+        False,
+        "--show-writer",
+        help="Show writer output when rewrite is triggered.",
+    ),
+    show_blackboard: bool = typer.Option(
+        False,
+        "--show-blackboard",
+        help="Show final blackboard metadata.",
+    ),
+    save_trace_report: bool = typer.Option(
+        False,
+        "--save-trace-report",
+        help="Save a markdown trace report for this graph multi-agent run.",
+    ),
+    show_graph: bool = typer.Option(
+        False,
+        "--show-graph",
+        help="Show graph visited nodes.",
+    ),
+):
+    """Run the graph-based multi-agent workflow."""
+
+    session = None
+
+    if session_id:
+        store = ConversationSessionStore()
+        session = store.load_or_create(session_id)
+
+    runner = build_multiagent_graph_workflow_runner(verbose=verbose)
+
+    result = runner.answer(
+        user_request=user_input,
+        session=session,
+    )
+
+    console.print("\n[bold green]Assistant >[/bold green]")
+    console.print(result.final_answer)
+
+    if show_graph:
+        metadata = getattr(result, "metadata", {})
+        visited_nodes = metadata.get("visited_nodes")
+        console.rule("[bold blue]Graph Visited Nodes")
+        console.print(visited_nodes or "[dim](empty)[/dim]")
+
+    if any(
+        [
+            show_plan,
+            show_review,
+            show_retry,
+            show_writer,
+            show_blackboard,
+        ]
+    ):
+        print_multiagent_debug(
+            result=result,
+            show_plan=show_plan,
+            show_review=show_review,
+            show_retry=show_retry,
+            show_writer=show_writer,
+            show_blackboard=show_blackboard,
+        )
+
+    if save_trace_report:
+        report_writer = MultiAgentTraceReportWriter()
+        report_path = report_writer.save(
+            state=result,
+            user_request=user_input,
+            session_id=session_id,
+        )
+        console.print(f"[dim]Graph multi-agent trace report saved to: {report_path}[/dim]")
+
 if __name__ == "__main__":
     app()
