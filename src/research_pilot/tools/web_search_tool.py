@@ -1,4 +1,4 @@
-from typing import Any
+﻿from typing import Any
 
 from research_pilot.config import settings
 from research_pilot.core.evidence import EvidenceItem, EvidenceType
@@ -21,7 +21,6 @@ class MockWebSearchTool(BaseTool):
             description=self.description,
             input_schema={
                 "query": "Search query string.",
-                "max_results": "Optional number of results. Default is 3.",
             },
         )
 

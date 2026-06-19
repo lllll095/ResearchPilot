@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 from io import StringIO
 import json
 
@@ -779,7 +779,7 @@ def chat(
 
                 result = multiagent_runner.answer(
                     user_request=user_message,
-                    session=session,
+                session=session,
                 )
             else:
                 result = run_ask_request(
@@ -1390,3 +1390,4 @@ def graph_multi_agent(
 
 if __name__ == "__main__":
     app()
+

@@ -1,4 +1,4 @@
-# src/research_pilot/prompts/prompt_sections.py
+﻿# src/research_pilot/prompts/prompt_sections.py
 
 BASE_POLICY_IDENTITY = """You are the decision policy of an Agent Harness.
 
@@ -73,6 +73,10 @@ PAPER_RULES = """Paper rules:
 
 
 ENGINEERED_RAG_RULES = """Engineered RAG rules:
+- IMPORTANT: engineered_rag_search is for searching ALREADY-INDEXED local PDF papers only.
+- If the user asks to search in a general context (not about indexed/local papers),
+  prefer web_search over engineered_rag_search.
+- If engineered_rag_search returns no results, fall back to web_search for general queries.
 - If the user asks to index downloaded papers into the previous RAG project, call engineered_rag_index.
 - If the user asks to search downloaded/indexed papers for evidence, call engineered_rag_search.
 - If the user asks to answer a paper question using the previous engineered RAG system, call engineered_rag_answer.
@@ -130,3 +134,4 @@ GENERAL_TOOL_RULES = """Tool rules:
 - Do not return final_answer until the user's explicitly requested actions are completed.
 - If a previous tool failed, choose another safe action or return final_answer.
 """
+

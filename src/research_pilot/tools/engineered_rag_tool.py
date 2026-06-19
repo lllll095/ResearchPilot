@@ -1,4 +1,4 @@
-import os
+﻿import os
 import importlib.util
 import json
 import shutil
@@ -342,8 +342,6 @@ class EngineeredRAGSearchTool(BaseTool):
             description=self.description,
             input_schema={
                 "query": "Question or query for the engineered paper RAG system.",
-                "paper_k": "Optional number of candidate papers.",
-                "chunk_k": "Optional number of evidence chunks.",
             },
         )
 
@@ -422,8 +420,6 @@ class EngineeredRAGAnswerTool(BaseTool):
             description=self.description,
             input_schema={
                 "question": "Question for the engineered paper RAG system.",
-                "paper_k": "Optional number of candidate papers.",
-                "chunk_k": "Optional number of evidence chunks.",
             },
         )
 

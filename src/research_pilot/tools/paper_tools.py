@@ -1,4 +1,4 @@
-import json
+﻿import json
 import re
 import time
 import urllib.parse
@@ -104,13 +104,20 @@ def _get_text(element, path: str) -> str:
     return found.text.strip()
 
 def _urlopen_with_certifi(request, timeout: int = 30):
-    """Open HTTPS URL using certifi CA bundle instead of Windows cert store.
+    """Open HTTPS URL using certifi CA bundle.
 
-    This avoids SSL errors in some Conda + Windows environments.
+    Falls back to default SSL context if certifi is unavailable.
     """
 
-    context = ssl.create_default_context(cafile=certifi.where())
-    return urllib.request.urlopen(request, timeout=timeout, context=context)
+    try:
+        context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        context = ssl.create_default_context()
+
+    try:
+        return urllib.request.urlopen(request, timeout=timeout, context=context)
+    except ssl.SSLError:
+        return urllib.request.urlopen(request, timeout=timeout)
 
 def search_arxiv(query: str, max_results: int = 5) -> list[dict[str, Any]]:
     """Search arXiv via the official Atom API."""
