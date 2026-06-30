@@ -145,3 +145,4 @@ with tab_about:
     **Run:** `streamlit run demo_app.py`
     """
     )
+
